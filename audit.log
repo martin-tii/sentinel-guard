@@ -1,0 +1,5 @@
+2026-02-10 11:21:27,892 - INFO - [INFO] SYSTEM: Sentinel Activated. Monitoring engaged.
+2026-02-10 11:21:27,892 - INFO - [BLOCKED] FILE_ACCESS: /etc/passwd
+2026-02-10 11:21:27,892 - INFO - [BLOCKED] EXEC_COMMAND: rm -rf /
+2026-02-10 11:21:27,892 - INFO - [BLOCKED] NETWORK_ACCESS: http://evil.com
+2026-02-10 11:21:27,892 - INFO - [BLOCKED] INPUT_SANITIZATION: Blocked keyword found: ignore previous instructions

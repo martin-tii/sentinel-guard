@@ -1,0 +1,29 @@
+# sentinel.yaml
+# 🛑 Policy Rules (The Brain)
+
+# The Jail: File System Isolation
+allowed_paths:
+  - "./workspace"
+  - "/tmp"
+  - "./sentinel.yaml" # Agent might need to read its own config? Maybe not, checking access.
+
+blocked_paths:
+  - "/etc"
+  - "~/.ssh"
+  - ".env"
+
+# The Governor: Action Firewall
+allowed_commands:
+  - "echo"
+  - "ls"
+  - "grep"
+
+allowed_hosts:
+  - "api.openai.com"
+  - "pypi.org"
+
+# The Airlock: Input Sanitization
+blocked_keywords:
+  - "ignore previous instructions"
+  - "system override"
+  - "sudo"
