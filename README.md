@@ -124,6 +124,25 @@ network_failsafe:
   allowed_ips: []            # optional IP/CIDR allowlist
 ```
 
+### Environment Variable Controls
+
+Emergency kill switch:
+
+```bash
+export SENTINEL_DISABLE=true
+```
+
+When set to `true` / `1` / `yes`, Sentinel will not activate.
+
+Inject policy from environment (useful in Docker/Kubernetes):
+
+```bash
+export SENTINEL_POLICY_CONTENT="$(cat sentinel.yaml)"
+```
+
+When `SENTINEL_POLICY_CONTENT` is present, Sentinel loads policy from that value first,
+then falls back to file-based `sentinel.yaml` if env YAML is invalid.
+
 ## 🕹️ Usage
 
 ### Integrating with an Agent

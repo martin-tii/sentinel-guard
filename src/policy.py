@@ -26,10 +26,22 @@ class PolicyEnforcer:
         return Path(__file__).resolve().parents[1] / candidate
 
     def _load_policy(self, path):
+        # Priority 1: policy passed directly via environment variable.
+        env_policy = os.environ.get("SENTINEL_POLICY_CONTENT")
+        if env_policy:
+            try:
+                audit("LOAD_POLICY", "Loading policy from environment variable", "INFO")
+                loaded = yaml.safe_load(env_policy)
+                return loaded if isinstance(loaded, dict) else {}
+            except yaml.YAMLError as e:
+                audit("LOAD_POLICY", f"Invalid policy in env var: {e}", "ERROR")
+
+        # Priority 2: fallback to policy file.
         try:
             # Use io.open so policy loading is not blocked by monkey-patched builtins.open
             with io.open(path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f)
+                loaded = yaml.safe_load(f)
+                return loaded if isinstance(loaded, dict) else {}
         except FileNotFoundError:
             audit("LOAD_POLICY", f"Policy file not found: {path}", "ERROR")
             return {}

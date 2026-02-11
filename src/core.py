@@ -307,6 +307,12 @@ def sentinel_socket_connect(self, address):
 def activate_sentinel():
     """Activates the Sentinel monitoring system."""
     global _sentinel_active, _socket_patch_active
+
+    # Emergency kill switch for production incidents.
+    if os.environ.get("SENTINEL_DISABLE", "").lower() in ("true", "1", "yes"):
+        audit("SYSTEM", "Sentinel disabled via SENTINEL_DISABLE env var.", "WARNING")
+        return
+
     if _sentinel_active:
         audit("SYSTEM", "Sentinel already active. Skipping re-patch.", "INFO")
         return
