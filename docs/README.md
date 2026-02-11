@@ -13,6 +13,11 @@ Use this page as the documentation entry point.
 - Deployment hardening: [../DEPLOYMENT.md](../DEPLOYMENT.md)
 - Security posture and residual risks: [../SECURITY_ASSESSMENT.md](../SECURITY_ASSESSMENT.md)
 - Moltbot integration: [MOLTBOT_INTEGRATION.md](./MOLTBOT_INTEGRATION.md)
+- Approval UI details: [Usage Modes](./USAGE_MODES.md#approval-handlers)
+
+## Approval UI
+
+![Sentinel approval popup](./images/approval-popup.png)
 
 ## Typical Paths
 

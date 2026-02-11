@@ -20,6 +20,7 @@ Last updated: 2026-02-11.
 
 ### Strengths
 - Defense-in-depth design: policy checks + optional AI risk scoring + human approval + container hardening.
+- Approval workflow can now default to interactive user decision (`auto/tkinter/console`) when no explicit handler is registered.
 - Command policy is shell-aware and blocks common chaining/injection operators in `shell=True` mode.
 - Socket-level fail-safe exists for non-HTTP egress paths.
 - Policy-file tampering bypass has been removed from runtime file interception.

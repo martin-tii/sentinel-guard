@@ -56,6 +56,14 @@ set_approval_handler(tkinter_approval_handler)
 
 You can also use `console_approval_handler` or a custom callback.
 
+![Sentinel approval popup](./images/approval-popup.png)
+
+If no handler is explicitly set, Sentinel can still prompt by default:
+
+```bash
+export SENTINEL_APPROVAL_MODE=auto   # auto | tkinter | console | reject
+```
+
 ## Verification
 
 ```bash

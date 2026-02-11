@@ -28,6 +28,9 @@ Compatibility mode (`activate_sentinel()` in-process hooks) is guardrails for ac
 
 Use `sentinel-isolate` for hard process/container boundaries.
 
+Blocked actions can default to user-approval prompts when no custom handler is set:
+- `SENTINEL_APPROVAL_MODE=auto` (default), `tkinter`, `console`, or `reject`.
+
 ## Documentation Map
 
 - Start here: [docs/README.md](docs/README.md)
@@ -37,6 +40,10 @@ Use `sentinel-isolate` for hard process/container boundaries.
 - Deployment hardening: [DEPLOYMENT.md](DEPLOYMENT.md)
 - Security posture: [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md)
 - Moltbot integration: [docs/MOLTBOT_INTEGRATION.md](docs/MOLTBOT_INTEGRATION.md)
+
+## Approval UI Preview
+
+![Sentinel approval popup](docs/images/approval-popup.png)
 
 ## Development
 

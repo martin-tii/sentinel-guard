@@ -54,6 +54,10 @@ network_failsafe:
 # Dual-control emergency disable
 export SENTINEL_DISABLE=true
 export SENTINEL_ALLOW_DISABLE=true
+
+# Approval behavior when no custom handler is registered:
+# auto (default), tkinter, console, reject
+export SENTINEL_APPROVAL_MODE=auto
 ```
 
 ### Policy Integrity

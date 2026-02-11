@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Callable, Optional
 import builtins
+import os
+import sys
 from .utils import audit
 
 
@@ -33,6 +35,40 @@ def clear_approval_handler():
 
 def get_approval_handler() -> Optional[ApprovalHandler]:
     return _approval_handler
+
+
+def _default_approval_mode() -> str:
+    mode = str(os.environ.get("SENTINEL_APPROVAL_MODE", "auto")).strip().lower()
+    if mode not in ("auto", "tkinter", "console", "reject"):
+        return "auto"
+    return mode
+
+
+def _can_try_tkinter_popup() -> bool:
+    if os.name == "nt":
+        return True
+    if sys.platform == "darwin":
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _resolve_default_handler() -> Optional[ApprovalHandler]:
+    mode = _default_approval_mode()
+    if mode == "reject":
+        return None
+    if mode == "tkinter":
+        return tkinter_approval_handler
+    if mode == "console":
+        if getattr(sys.stdin, "isatty", lambda: False)():
+            return console_approval_handler
+        return None
+
+    # auto mode: popup first, then console if interactive terminal exists.
+    if _can_try_tkinter_popup():
+        return tkinter_approval_handler
+    if getattr(sys.stdin, "isatty", lambda: False)():
+        return console_approval_handler
+    return None
 
 
 def console_approval_handler(alert: SecurityAlert) -> bool:
@@ -175,10 +211,16 @@ def request_user_approval(alert: SecurityAlert) -> bool:
     Defaults to reject when no handler is configured.
     """
     handler = get_approval_handler()
+    default_mode = _default_approval_mode()
+    using_default_handler = False
+    if handler is None:
+        handler = _resolve_default_handler()
+        using_default_handler = handler is not None
+
     if handler is None:
         audit(
             "SECURITY_ALERT",
-            f"{alert.action} -> {alert.target} | No approval handler configured",
+            f"{alert.action} -> {alert.target} | No approval handler configured (mode={default_mode})",
             "REJECTED",
         )
         return False
@@ -194,5 +236,12 @@ def request_user_approval(alert: SecurityAlert) -> bool:
         return False
 
     status = "APPROVED" if approved else "REJECTED"
-    audit("SECURITY_ALERT", f"{alert.action} -> {alert.target} | {alert.reason}", status)
+    if using_default_handler:
+        audit(
+            "SECURITY_ALERT",
+            f"{alert.action} -> {alert.target} | {alert.reason} | default_mode={default_mode}",
+            status,
+        )
+    else:
+        audit("SECURITY_ALERT", f"{alert.action} -> {alert.target} | {alert.reason}", status)
     return approved
