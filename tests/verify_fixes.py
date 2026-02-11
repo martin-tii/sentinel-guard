@@ -3,6 +3,8 @@ import os
 import subprocess
 import shutil
 import requests
+import urllib.request as urllib_request
+import http.client as http_client
 from pathlib import Path
 import builtins
 
@@ -75,6 +77,27 @@ except Exception as e:
     print("✅ PASSED: Blocked requests.post to disallowed host.")
     print(f"   Reason: {e}")
 
+# TEST 5B: urllib interception
+print("\n[TEST 5B] Testing urllib.request interception...")
+try:
+    urllib_request.urlopen("http://evil.com", timeout=1)
+    print("❌ FAILED: urllib.request to blocked host executed!")
+except Exception as e:
+    print("✅ PASSED: Blocked urllib.request to disallowed host.")
+    print(f"   Reason: {e}")
+
+# TEST 5C: http.client interception
+print("\n[TEST 5C] Testing http.client interception...")
+conn = http_client.HTTPConnection("evil.com", timeout=1)
+try:
+    conn.request("GET", "/")
+    print("❌ FAILED: http.client request to blocked host executed!")
+except Exception as e:
+    print("✅ PASSED: Blocked http.client request to disallowed host.")
+    print(f"   Reason: {e}")
+finally:
+    conn.close()
+
 # TEST 6: shell-aware parsing should allow quoted operator characters
 print("\n[TEST 6] Testing quoted shell operators are not misdetected...")
 try:
@@ -90,6 +113,37 @@ try:
     print("✅ PASSED: argv mode allowed symbolic argument.")
 except Exception as e:
     print(f"❌ FAILED: argv mode incorrectly blocked symbolic arg: {e}")
+
+# TEST 7B: command substitution should be blocked for shell=True
+print("\n[TEST 7B] Testing command substitution with $() is blocked...")
+try:
+    subprocess.run("echo $(echo hacked)", shell=True, check=True, capture_output=True, text=True)
+    print("❌ FAILED: Command substitution via $() executed!")
+except Exception as e:
+    print("✅ PASSED: Blocked command substitution via $().")
+    print(f"   Reason: {e}")
+
+# TEST 7C: backtick substitution should be blocked for shell=True
+print("\n[TEST 7C] Testing command substitution with backticks is blocked...")
+try:
+    subprocess.run("echo `echo hacked`", shell=True, check=True, capture_output=True, text=True)
+    print("❌ FAILED: Command substitution via backticks executed!")
+except Exception as e:
+    print("✅ PASSED: Blocked command substitution via backticks.")
+    print(f"   Reason: {e}")
+
+# TEST 7D: fail-safe should block interpreters even if misconfigured as allowed
+print("\n[TEST 7D] Testing fail-safe blocks interpreter base commands...")
+try:
+    enforcer = PolicyEnforcer()
+    enforcer.policy.setdefault("allowed_commands", [])
+    if "python" not in enforcer.policy["allowed_commands"]:
+        enforcer.policy["allowed_commands"].append("python")
+    enforcer.check_command(["python", "-c", "print('ok')"], shell=False)
+    print("❌ FAILED: Interpreter command allowed after accidental whitelist!")
+except Exception as e:
+    print("✅ PASSED: Fail-safe blocked interpreter command despite whitelist.")
+    print(f"   Reason: {e}")
 
 # TEST 8: policy loading should not depend on current working directory
 print("\n[TEST 8] Testing CWD-independent policy loading...")

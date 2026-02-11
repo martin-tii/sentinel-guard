@@ -82,6 +82,24 @@ class PolicyEnforcer:
             return token
         return None
 
+    def _blocked_command_bases(self):
+        configured = self.policy.get("blocked_command_bases", [])
+        defaults = [
+            "python", "python3", "bash", "sh", "zsh", "fish",
+            "perl", "ruby", "node", "php", "pwsh", "powershell",
+        ]
+        blocked = set(defaults)
+        blocked.update(str(cmd).strip() for cmd in configured if str(cmd).strip())
+        return blocked
+
+    def _enforce_command_base_policy(self, cmd_base, command_text):
+        blocked = self._blocked_command_bases()
+        if cmd_base in blocked:
+            audit("EXEC_COMMAND", command_text, "BLOCKED (Forbidden Base Command)")
+            raise PermissionError(
+                f"Command '{cmd_base}' is blocked by fail-safe policy."
+            )
+
     def check_command(self, command, shell=False):
         """The Governor: Validate command execution with shell-aware parsing."""
         if command is None:
@@ -106,6 +124,7 @@ class PolicyEnforcer:
                     return True
                 cmd_base = parts[0]
 
+            self._enforce_command_base_policy(cmd_base, str(command))
             if cmd_base not in allowed_commands:
                 audit("EXEC_COMMAND", str(command), "BLOCKED")
                 raise PermissionError(f"Command '{cmd_base}' is not allowed.")
@@ -128,16 +147,22 @@ class PolicyEnforcer:
         if not tokens:
             return True
 
-        blocked_operators = {";", "&&", "||", "|", "&", ">", ">>", "<", "<<"}
-        if any(token in blocked_operators for token in tokens):
+        blocked_operators = {
+            ";", "&&", "||", "|", "&", ">", ">>", "<", "<<",
+            "$", "(", ")", "`",
+        }
+        has_blocked_operator = any(token in blocked_operators for token in tokens)
+        has_substitution_pattern = ("$(" in command_text) or ("`" in command_text)
+        if has_blocked_operator or has_substitution_pattern:
             audit("EXEC_COMMAND", command_text, "BLOCKED (Shell Injection Risk)")
-            raise PermissionError("Complex shell chaining/redirection is not allowed.")
+            raise PermissionError("Complex shell chaining/redirection/substitution is not allowed.")
 
         cmd_base = self._command_base_from_shell_tokens(tokens)
         if not cmd_base:
             audit("EXEC_COMMAND", command_text, "BLOCKED (Malformed)")
             raise PermissionError("Could not determine executable command.")
 
+        self._enforce_command_base_policy(cmd_base, command_text)
         if cmd_base not in allowed_commands:
             audit("EXEC_COMMAND", command_text, "BLOCKED")
             raise PermissionError(f"Command '{cmd_base}' is not allowed.")

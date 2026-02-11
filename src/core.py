@@ -2,6 +2,8 @@ import builtins
 import os
 import subprocess
 import requests # Assuming requests is used, we'll patch it
+import urllib.request as urllib_request
+import http.client as http_client
 from urllib.parse import urlparse
 from .policy import PolicyEnforcer
 from .utils import audit, is_phishing_url
@@ -157,6 +159,9 @@ def sentinel_system(command):
 
 # 3. Network Interceptor (The Governor + Phishing Guard)
 _original_session_request = requests.sessions.Session.request
+_original_urlopen = urllib_request.urlopen
+_original_http_request = http_client.HTTPConnection.request
+_original_https_request = http_client.HTTPSConnection.request
 _sentinel_active = False
 
 
@@ -203,6 +208,52 @@ def sentinel_session_request(self, method, url, **kwargs):
     return _original_session_request(self, method, url, **kwargs)
 
 
+def _extract_urllib_url(target):
+    if isinstance(target, urllib_request.Request):
+        return target.full_url
+    return str(target)
+
+
+def sentinel_urlopen(url, *args, **kwargs):
+    _enforce_network_policy(_extract_urllib_url(url))
+    return _original_urlopen(url, *args, **kwargs)
+
+
+def _normalize_http_target(scheme, host, url):
+    if isinstance(url, str) and (url.startswith("http://") or url.startswith("https://")):
+        return url
+    path = str(url)
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"{scheme}://{host}{path}"
+
+
+def sentinel_http_request(self, method, url, body=None, headers=None, *, encode_chunked=False):
+    target = _normalize_http_target("http", getattr(self, "host", ""), url)
+    _enforce_network_policy(target)
+    return _original_http_request(
+        self,
+        method,
+        url,
+        body=body,
+        headers=headers if headers is not None else {},
+        encode_chunked=encode_chunked,
+    )
+
+
+def sentinel_https_request(self, method, url, body=None, headers=None, *, encode_chunked=False):
+    target = _normalize_http_target("https", getattr(self, "host", ""), url)
+    _enforce_network_policy(target)
+    return _original_https_request(
+        self,
+        method,
+        url,
+        body=body,
+        headers=headers if headers is not None else {},
+        encode_chunked=encode_chunked,
+    )
+
+
 # --- Activation ---
 
 def activate_sentinel():
@@ -220,6 +271,9 @@ def activate_sentinel():
     subprocess.Popen = sentinel_popen
     os.system = sentinel_system
     requests.sessions.Session.request = sentinel_session_request
+    urllib_request.urlopen = sentinel_urlopen
+    http_client.HTTPConnection.request = sentinel_http_request
+    http_client.HTTPSConnection.request = sentinel_https_request
     _sentinel_active = True
 
 
@@ -235,6 +289,9 @@ def deactivate_sentinel():
     subprocess.Popen = _original_popen
     os.system = _original_os_system
     requests.sessions.Session.request = _original_session_request
+    urllib_request.urlopen = _original_urlopen
+    http_client.HTTPConnection.request = _original_http_request
+    http_client.HTTPSConnection.request = _original_https_request
     _sentinel_active = False
     audit("SYSTEM", "Sentinel Deactivated. Original runtime restored.", "INFO")
 

@@ -13,7 +13,7 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
     *   Restricts file system access to a specific `./workspace`.
     *   Blocks access to sensitive files like `.env`, `.ssh`, and system directories.
 3.  **The Governor (Action Firewall)**
-    *   **Action Interception**: Patches `subprocess.run`, `subprocess.Popen`, `os.system`, `requests` session requests, and `builtins.open`.
+    *   **Action Interception**: Patches `subprocess.run`, `subprocess.Popen`, `os.system`, `requests` session requests, `urllib.request.urlopen`, `http.client` requests, and `builtins.open`.
     *   **Static Whitelisting**: Only allows approved commands and network hosts.
     *   **Shell-Aware Command Policy**: Applies strict operator blocking for `shell=True` and command-base whitelisting for argv/list execution.
     *   **Phishing Guard (New)**: Heuristic detection of suspicious URLs and brand impersonation.
@@ -73,6 +73,13 @@ judge:
 phishing:
   enabled: true
   blocked_tlds: [".xyz", ".top", ".zip"] 
+
+# 🔒 FAIL-SAFE COMMAND BASE DENYLIST
+# These are blocked even if accidentally added to allowed_commands.
+blocked_command_bases:
+  - "python"
+  - "bash"
+  - "sh"
 ```
 
 ## 🕹️ Usage
