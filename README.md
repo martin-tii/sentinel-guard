@@ -14,6 +14,7 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
     *   Blocks access to sensitive files like `.env`, `.ssh`, and system directories.
 3.  **The Governor (Action Firewall)**
     *   **Action Interception**: Patches `subprocess.run`, `subprocess.Popen`, `os.system`, `requests` session requests, `urllib.request.urlopen`, `http.client` requests, and `builtins.open`.
+    *   **Optional Socket Fail-Safe (V2)**: Can patch `socket.socket.connect` as a low-level fallback for non-standard clients.
     *   **Static Whitelisting**: Only allows approved commands and network hosts.
     *   **Shell-Aware Command Policy**: Applies strict operator blocking for `shell=True` and command-base whitelisting for argv/list execution.
     *   **Phishing Guard (New)**: Heuristic detection of suspicious URLs and brand impersonation.
@@ -80,6 +81,14 @@ blocked_command_bases:
   - "python"
   - "bash"
   - "sh"
+
+# 🌐 OPTIONAL SOCKET FAIL-SAFE (V2)
+network_failsafe:
+  socket_connect: false      # enable to patch socket.socket.connect
+  allow_private_network: false
+  blocked_hosts: []          # optional host/domain denylist
+  blocked_ips: []            # optional IP/CIDR denylist
+  allowed_ips: []            # optional IP/CIDR allowlist
 ```
 
 ## 🕹️ Usage
@@ -167,6 +176,9 @@ python examples/smart_test.py
 
 > [!NOTE]
 > Activation is idempotent. Repeated `activate_sentinel()` calls do not stack patches, and `deactivate_sentinel()` restores original functions.
+
+> [!NOTE]
+> Socket fail-safe gives broader coverage but lower context. At socket layer Sentinel sees host/IP and port, not full URL paths.
 
 ## 📝 Audit Logging
 

@@ -2,6 +2,8 @@ import yaml
 import os
 import shlex
 import io
+import socket
+import ipaddress
 from urllib.parse import urlparse
 from pathlib import Path
 from .utils import audit
@@ -184,19 +186,124 @@ class PolicyEnforcer:
              audit("NETWORK_ACCESS", url, "BLOCKED (No Hostname)")
              raise PermissionError("URL must contain a hostname.")
 
-        # Check whitelist
-        allowed = False
-        for allowed_host in self.policy.get("allowed_hosts", []):
-            # Strict match or subdomain match (e.g., .openai.com)
-            if hostname == allowed_host or hostname.endswith("." + allowed_host):
-                allowed = True
-                break
-        
-        if not allowed:
+        if not self._is_allowed_hostname(hostname):
             audit("NETWORK_ACCESS", url, "BLOCKED")
             raise PermissionError(f"Network access to {hostname} is blocked.")
             
         audit("NETWORK_ACCESS", url, "ALLOWED")
+        return True
+
+    def _is_allowed_hostname(self, hostname):
+        allowed_hosts = self.policy.get("allowed_hosts", [])
+        for allowed_host in allowed_hosts:
+            if hostname == allowed_host or hostname.endswith("." + allowed_host):
+                return True
+        return False
+
+    def _host_in_rules(self, host, rules):
+        for rule in rules:
+            rule = str(rule).strip()
+            if not rule:
+                continue
+            if host == rule or host.endswith("." + rule):
+                return True
+        return False
+
+    def _resolve_host_ips(self, host):
+        resolved = set()
+        try:
+            ip_obj = ipaddress.ip_address(host)
+            resolved.add(ip_obj)
+            return resolved
+        except ValueError:
+            pass
+
+        try:
+            infos = socket.getaddrinfo(host, None)
+            for info in infos:
+                sockaddr = info[4]
+                if not sockaddr:
+                    continue
+                ip_str = sockaddr[0]
+                try:
+                    resolved.add(ipaddress.ip_address(ip_str))
+                except ValueError:
+                    continue
+        except Exception:
+            return resolved
+        return resolved
+
+    def _ip_matches_any_rule(self, ip_obj, rules):
+        for rule in rules:
+            rule = str(rule).strip()
+            if not rule:
+                continue
+            try:
+                if "/" in rule:
+                    if ip_obj in ipaddress.ip_network(rule, strict=False):
+                        return True
+                else:
+                    if ip_obj == ipaddress.ip_address(rule):
+                        return True
+            except ValueError:
+                continue
+        return False
+
+    def check_socket_connect(self, host, port):
+        """
+        Socket-level fail-safe check.
+        Used when network_failsafe.socket_connect is enabled.
+        """
+        host_text = str(host).strip()
+        if not host_text:
+            audit("SOCKET_CONNECT", f"{host}:{port}", "BLOCKED (No Host)")
+            raise PermissionError("Socket connect target host is required.")
+
+        # Unix domain socket paths are not remote network hosts.
+        if host_text.startswith("/"):
+            audit("SOCKET_CONNECT", f"{host_text}:{port}", "ALLOWED")
+            return True
+
+        cfg = self.policy.get("network_failsafe", {})
+        blocked_hosts = cfg.get("blocked_hosts", [])
+        if self._host_in_rules(host_text, blocked_hosts):
+            audit("SOCKET_CONNECT", f"{host_text}:{port}", "BLOCKED (Blocked Host)")
+            raise PermissionError(f"Socket access to {host_text} is blocked.")
+
+        # Hostname policy is still enforced at socket layer.
+        # If host is an IP literal, hostname allowlist does not apply.
+        is_ip_literal = True
+        try:
+            ipaddress.ip_address(host_text)
+        except ValueError:
+            is_ip_literal = False
+
+        if not is_ip_literal and not self._is_allowed_hostname(host_text):
+            audit("SOCKET_CONNECT", f"{host_text}:{port}", "BLOCKED (Host Not Allowed)")
+            raise PermissionError(f"Socket access to {host_text} is blocked.")
+
+        resolved_ips = self._resolve_host_ips(host_text)
+        blocked_ips = cfg.get("blocked_ips", [])
+        allowed_ips = cfg.get("allowed_ips", [])
+        allow_private_network = bool(cfg.get("allow_private_network", False))
+
+        if resolved_ips:
+            for ip_obj in resolved_ips:
+                if self._ip_matches_any_rule(ip_obj, blocked_ips):
+                    audit("SOCKET_CONNECT", f"{host_text}:{port}", "BLOCKED (Blocked IP)")
+                    raise PermissionError(f"Socket access to {ip_obj} is blocked.")
+
+                if allowed_ips and not self._ip_matches_any_rule(ip_obj, allowed_ips):
+                    audit("SOCKET_CONNECT", f"{host_text}:{port}", "BLOCKED (IP Not Allowed)")
+                    raise PermissionError(f"Socket access to {ip_obj} is not allowed.")
+
+                if not allow_private_network and (
+                    ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local
+                ):
+                    audit("SOCKET_CONNECT", f"{host_text}:{port}", "BLOCKED (Private Network)")
+                    raise PermissionError(f"Private network socket access to {ip_obj} is blocked.")
+
+        audit("SOCKET_CONNECT", f"{host_text}:{port}", "ALLOWED")
         return True
 
     def check_input(self, text):

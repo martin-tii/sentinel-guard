@@ -4,6 +4,7 @@ import subprocess
 import requests # Assuming requests is used, we'll patch it
 import urllib.request as urllib_request
 import http.client as http_client
+import socket
 from urllib.parse import urlparse
 from .policy import PolicyEnforcer
 from .utils import audit, is_phishing_url
@@ -27,6 +28,8 @@ judge_config.setdefault("risk_threshold", 0.7)
 judge_config.setdefault("fail_open", False)
 ai_judge = AIJudge(judge_config)
 phishing_config = policy.policy.get("phishing", {})
+network_failsafe_config = policy.policy.get("network_failsafe", {})
+socket_failsafe_enabled = bool(network_failsafe_config.get("socket_connect", False))
 
 # --- Interceptors ---
 
@@ -162,7 +165,9 @@ _original_session_request = requests.sessions.Session.request
 _original_urlopen = urllib_request.urlopen
 _original_http_request = http_client.HTTPConnection.request
 _original_https_request = http_client.HTTPSConnection.request
+_original_socket_connect = socket.socket.connect
 _sentinel_active = False
+_socket_patch_active = False
 
 
 def _is_internal_judge_endpoint(url):
@@ -170,6 +175,25 @@ def _is_internal_judge_endpoint(url):
         judge_host = urlparse(ai_judge.endpoint).hostname
         target_host = urlparse(url).hostname
         return bool(judge_host and target_host and judge_host == target_host)
+    except Exception:
+        return False
+
+
+def _is_internal_judge_socket_target(host):
+    try:
+        judge_host = urlparse(ai_judge.endpoint).hostname
+        if not judge_host:
+            return False
+        host_text = str(host).strip()
+        if host_text == judge_host:
+            return True
+
+        try:
+            host_ips = {info[4][0] for info in socket.getaddrinfo(host_text, None)}
+            judge_ips = {info[4][0] for info in socket.getaddrinfo(judge_host, None)}
+            return bool(host_ips & judge_ips)
+        except Exception:
+            return False
     except Exception:
         return False
 
@@ -254,11 +278,35 @@ def sentinel_https_request(self, method, url, body=None, headers=None, *, encode
     )
 
 
+def sentinel_socket_connect(self, address):
+    if isinstance(address, tuple) and len(address) >= 2:
+        host = address[0]
+        port = address[1]
+    else:
+        # Non-INET socket types (e.g., unix sockets) are passed through.
+        return _original_socket_connect(self, address)
+
+    if _is_internal_judge_socket_target(host):
+        audit("SOCKET_CONNECT", f"{host}:{port} (AI Judge endpoint)", "ALLOWED")
+        return _original_socket_connect(self, address)
+
+    try:
+        policy.check_socket_connect(host, port)
+    except PermissionError as e:
+        _enforce_or_escalate(
+            action="network_access",
+            target=f"socket://{host}:{port}",
+            reason=e,
+            recommendation="Reject unless this socket destination is explicitly trusted.",
+        )
+    return _original_socket_connect(self, address)
+
+
 # --- Activation ---
 
 def activate_sentinel():
     """Activates the Sentinel monitoring system."""
-    global _sentinel_active
+    global _sentinel_active, _socket_patch_active
     if _sentinel_active:
         audit("SYSTEM", "Sentinel already active. Skipping re-patch.", "INFO")
         return
@@ -274,12 +322,15 @@ def activate_sentinel():
     urllib_request.urlopen = sentinel_urlopen
     http_client.HTTPConnection.request = sentinel_http_request
     http_client.HTTPSConnection.request = sentinel_https_request
+    if socket_failsafe_enabled:
+        socket.socket.connect = sentinel_socket_connect
+        _socket_patch_active = True
     _sentinel_active = True
 
 
 def deactivate_sentinel():
     """Restores original runtime functions and disables Sentinel interception."""
-    global _sentinel_active
+    global _sentinel_active, _socket_patch_active
     if not _sentinel_active:
         audit("SYSTEM", "Sentinel already inactive. Nothing to restore.", "INFO")
         return
@@ -292,6 +343,9 @@ def deactivate_sentinel():
     urllib_request.urlopen = _original_urlopen
     http_client.HTTPConnection.request = _original_http_request
     http_client.HTTPSConnection.request = _original_https_request
+    if _socket_patch_active:
+        socket.socket.connect = _original_socket_connect
+        _socket_patch_active = False
     _sentinel_active = False
     audit("SYSTEM", "Sentinel Deactivated. Original runtime restored.", "INFO")
 

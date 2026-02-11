@@ -5,6 +5,7 @@ import shutil
 import requests
 import urllib.request as urllib_request
 import http.client as http_client
+import socket
 from pathlib import Path
 import builtins
 
@@ -98,6 +99,28 @@ except Exception as e:
 finally:
     conn.close()
 
+# TEST 5D: optional socket.connect fail-safe
+print("\n[TEST 5D] Testing optional socket.connect fail-safe...")
+previous_socket_failsafe = core.socket_failsafe_enabled
+try:
+    deactivate_sentinel()
+    core.socket_failsafe_enabled = True
+    activate_sentinel()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(1)
+        sock.connect(("evil.com", 80))
+        print("❌ FAILED: socket.connect to blocked host executed!")
+    except Exception as e:
+        print("✅ PASSED: Blocked socket.connect to disallowed host.")
+        print(f"   Reason: {e}")
+    finally:
+        sock.close()
+finally:
+    deactivate_sentinel()
+    core.socket_failsafe_enabled = previous_socket_failsafe
+    activate_sentinel()
+
 # TEST 6: shell-aware parsing should allow quoted operator characters
 print("\n[TEST 6] Testing quoted shell operators are not misdetected...")
 try:
@@ -163,11 +186,18 @@ print("\n[TEST 9] Testing activate_sentinel idempotency...")
 before_open = builtins.open
 before_run = subprocess.run
 before_session_request = requests.sessions.Session.request
+before_socket_connect = socket.socket.connect
 activate_sentinel()
 after_open = builtins.open
 after_run = subprocess.run
 after_session_request = requests.sessions.Session.request
-if before_open is after_open and before_run is after_run and before_session_request is after_session_request:
+after_socket_connect = socket.socket.connect
+if (
+    before_open is after_open
+    and before_run is after_run
+    and before_session_request is after_session_request
+    and before_socket_connect is after_socket_connect
+):
     print("✅ PASSED: Repeated activation does not stack/replace patches.")
 else:
     print("❌ FAILED: Repeated activation changed patched function references.")
@@ -181,6 +211,7 @@ restored = (
     and subprocess.Popen is core._original_popen
     and os.system is core._original_os_system
     and requests.sessions.Session.request is core._original_session_request
+    and socket.socket.connect is core._original_socket_connect
 )
 if not restored:
     print("❌ FAILED: Deactivation did not restore all original functions.")

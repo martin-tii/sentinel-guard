@@ -28,4 +28,12 @@ phishing:
   suspicious_keywords: ["login", "verify", "update", "bank", "wallet"]
   blocked_tlds: [".xyz", ".top", ".gq", ".zip"] 
 
+# Optional V2 socket-level network guard (default off).
+network_failsafe:
+  socket_connect: false
+  allow_private_network: false
+  blocked_hosts: []
+  blocked_ips: []
+  allowed_ips: []
+
   
