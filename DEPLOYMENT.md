@@ -64,8 +64,22 @@ docker compose --profile standard run --rm sentinel-standard
 sentinel-isolate \
   --workspace ./sandbox-workspace \
   --policy ./sentinel.yaml \
+  --seccomp-mode enforce \
   --network none \
   -- python your_agent.py
+```
+
+Seccomp troubleshooting modes:
+
+- `--seccomp-mode enforce` (default): strict allowlist enforcement.
+- `--seccomp-mode log`: complain/audit mode (`SCMP_ACT_LOG` default action).
+- `--seccomp-mode off`: disable seccomp (`seccomp=unconfined`) for break-glass troubleshooting only.
+
+You can also set `SENTINEL_SECCOMP_MODE=enforce|log|off`.
+When debugging blocked syscalls in `log` mode, inspect kernel logs:
+
+```bash
+dmesg | tail -n 100
 ```
 
 ## Sandbox Workspace
@@ -85,6 +99,18 @@ Host directory `./sandbox-workspace` is mounted to `/workspace` in the container
 - custom seccomp allowlist profile (`seccomp/sentinel-seccomp.json`)
 - `tmpfs` for `/tmp` and `/run`
 - process/memory/CPU limits
+
+## Compatibility Mode Performance Tuning
+
+In in-process compatibility mode, runtime integrity checks are deep-verified periodically by default.
+
+```bash
+# Default: 250ms
+export SENTINEL_TAMPER_CHECK_INTERVAL_MS=250
+
+# Optional additional random deep-check sampling [0.0..1.0]
+export SENTINEL_TAMPER_CHECK_SAMPLE_RATE=0.0
+```
 
 ## Socket Fail-Safe (Default On)
 

@@ -66,6 +66,42 @@ class IsolationCommandBuildTests(unittest.TestCase):
         with self.assertRaises(IsolationError):
             build_docker_run_command([])
 
+    def test_seccomp_off_uses_unconfined_without_profile_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(tmp / "missing-seccomp.json"),
+                seccomp_mode="off",
+            )
+            cmd = build_docker_run_command(["python", "app.py"], cfg)
+            self.assertIn("seccomp=unconfined", cmd)
+
+    def test_invalid_seccomp_mode_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+            seccomp = tmp / "seccomp.json"
+            seccomp.write_text("{}", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(seccomp),
+                seccomp_mode="invalid",
+            )
+            with self.assertRaises(IsolationError):
+                build_docker_run_command(["python", "app.py"], cfg)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -104,6 +104,13 @@ When possible, run untrusted workloads with container isolation:
 sentinel-isolate --build-if-missing -- python moltbot.py
 ```
 
+If Moltbot crashes under strict seccomp, use complain mode to diagnose syscall friction:
+
+```bash
+sentinel-isolate --seccomp-mode log --build-if-missing -- python moltbot.py
+dmesg | tail -n 100
+```
+
 ## Troubleshooting
 
 ### `ModuleNotFoundError` or import errors

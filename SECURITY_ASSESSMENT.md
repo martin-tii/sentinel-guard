@@ -27,6 +27,7 @@ Last updated: 2026-02-11.
 - Runtime AI action adjudication now combines heuristics with model review for medium/high-risk actions.
 - Host policy now supports strict exact-match mode and optional per-host scheme/port constraints.
 - Runtime tamper detection verifies critical hook bindings and fails closed on drift.
+- Runtime tamper detection now supports interval/sampling cadence controls to reduce hot-path overhead.
 - Startup attestation output is emitted at activation with policy/integrity state.
 - High-assurance policy controls now support SHA256/HMAC verification and runtime immutability checks.
 - Production mode enforces signed policy verification + immutable policy checks.
@@ -35,6 +36,7 @@ Last updated: 2026-02-11.
   - dropped Linux capabilities
   - `no-new-privileges`
   - seccomp allowlist profile (`SCMP_ACT_ERRNO` default + explicit allowed syscalls)
+  - seccomp complain mode option (`SCMP_ACT_LOG`) for workload/syscall tuning
   - process/memory/CPU limits
   - strict mode with `network_mode: none` as the default demo posture
 
@@ -44,6 +46,7 @@ Last updated: 2026-02-11.
 - Runtime tamper detection and drift fail-close enforcement are active.
 - Immutable/signed policy options are implemented, with production-mode hard-fail requirements.
 - Production isolated execution blocks networked mode unless an explicit exception flag is set.
+- Isolation runner now supports `enforce/log/off` seccomp modes for secure-by-default operation with explicit debugging fallback.
 
 ### Remaining Risks and Gaps
 

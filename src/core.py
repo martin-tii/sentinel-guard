@@ -3,11 +3,13 @@ import errno
 import io
 import os
 import pathlib
+import random
 import subprocess
 import requests # Assuming requests is used, we'll patch it
 import urllib.request as urllib_request
 import http.client as http_client
 import socket
+import time
 from urllib.parse import urlparse
 from .policy import PolicyEnforcer
 from .utils import audit, is_phishing_url
@@ -40,6 +42,55 @@ tamper_detection_enabled = bool(policy_integrity_config.get("tamper_detection", 
 
 def _is_truthy(value):
     return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
+def _env_float(name, default):
+    raw = os.environ.get(name)
+    if raw is None:
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _integrity_interval_seconds():
+    interval_ms = _env_float("SENTINEL_TAMPER_CHECK_INTERVAL_MS", 250.0)
+    if interval_ms <= 0:
+        return 0.0
+    return interval_ms / 1000.0
+
+
+def _integrity_sample_rate():
+    rate = _env_float("SENTINEL_TAMPER_CHECK_SAMPLE_RATE", 0.0)
+    if rate < 0:
+        return 0.0
+    if rate > 1:
+        return 1.0
+    return rate
+
+
+def _should_run_integrity_check(force=False):
+    global _last_integrity_check_at
+    if force:
+        _last_integrity_check_at = time.monotonic()
+        return True
+
+    sample_rate = _integrity_sample_rate()
+    if sample_rate > 0.0 and random.random() < sample_rate:
+        _last_integrity_check_at = time.monotonic()
+        return True
+
+    interval = _integrity_interval_seconds()
+    if interval <= 0:
+        _last_integrity_check_at = time.monotonic()
+        return True
+
+    now = time.monotonic()
+    if (now - _last_integrity_check_at) >= interval:
+        _last_integrity_check_at = now
+        return True
+    return False
 
 # --- Interceptors ---
 
@@ -446,6 +497,7 @@ _sentinel_active = False
 _socket_patch_active = False
 _integrity_check_in_progress = False
 _expected_runtime_bindings = {}
+_last_integrity_check_at = 0.0
 
 
 def _is_production_mode():
@@ -497,11 +549,13 @@ def _record_expected_runtime_bindings():
     _expected_runtime_bindings = {name: getter() for name, getter in getters.items()}
 
 
-def _assert_runtime_integrity():
+def _assert_runtime_integrity(force=False):
     global _integrity_check_in_progress
     if not _sentinel_active or not tamper_detection_enabled:
         return
     if _integrity_check_in_progress:
+        return
+    if not _should_run_integrity_check(force=force):
         return
 
     _integrity_check_in_progress = True
@@ -787,7 +841,7 @@ def sentinel_socket_sendto(self, data, *args):
 
 def activate_sentinel():
     """Activates the Sentinel monitoring system."""
-    global _sentinel_active, _socket_patch_active
+    global _sentinel_active, _socket_patch_active, _last_integrity_check_at
 
     # Emergency kill switch for production incidents.
     disable_requested = _is_truthy(os.environ.get("SENTINEL_DISABLE", ""))
@@ -811,6 +865,7 @@ def activate_sentinel():
         audit("SYSTEM", "Sentinel already active. Skipping re-patch.", "INFO")
         return
 
+    _last_integrity_check_at = 0.0
     _assert_production_integrity_requirements()
     audit("SYSTEM", "Sentinel Activated. Monitoring engaged.", "INFO")
 
@@ -870,13 +925,13 @@ def activate_sentinel():
         _socket_patch_active = True
     _sentinel_active = True
     _record_expected_runtime_bindings()
-    _assert_runtime_integrity()
+    _assert_runtime_integrity(force=True)
     _emit_startup_attestation()
 
 
 def deactivate_sentinel():
     """Restores original runtime functions and disables Sentinel interception."""
-    global _sentinel_active, _socket_patch_active, _expected_runtime_bindings
+    global _sentinel_active, _socket_patch_active, _expected_runtime_bindings, _last_integrity_check_at
     if not _sentinel_active:
         audit("SYSTEM", "Sentinel already inactive. Nothing to restore.", "INFO")
         return
@@ -935,6 +990,7 @@ def deactivate_sentinel():
         socket.socket.sendto = _original_socket_sendto
         _socket_patch_active = False
     _expected_runtime_bindings = {}
+    _last_integrity_check_at = 0.0
     _sentinel_active = False
     audit("SYSTEM", "Sentinel Deactivated. Original runtime restored.", "INFO")
 

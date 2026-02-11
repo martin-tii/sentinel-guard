@@ -17,6 +17,7 @@ class RuntimeTamperDetectionTests(unittest.TestCase):
         self._original_env = dict(os.environ)
         os.environ.pop("SENTINEL_DISABLE", None)
         os.environ.pop("SENTINEL_ALLOW_DISABLE", None)
+        os.environ["SENTINEL_TAMPER_CHECK_INTERVAL_MS"] = "0"
 
     def tearDown(self):
         core.deactivate_sentinel()

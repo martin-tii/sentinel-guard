@@ -227,6 +227,23 @@ To explicitly allow a networked exception:
 export SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true
 ```
 
+Runtime tamper-check performance tuning (compatibility mode):
+
+```bash
+# Default: deep integrity check every 250ms (plus optional sampling).
+export SENTINEL_TAMPER_CHECK_INTERVAL_MS=250
+
+# Optional additional random sampling rate per intercepted action [0.0..1.0].
+export SENTINEL_TAMPER_CHECK_SAMPLE_RATE=0.0
+```
+
+Isolation seccomp mode control:
+
+```bash
+# enforce (default) | log (complain mode) | off
+export SENTINEL_SECCOMP_MODE=enforce
+```
+
 ## 🕹️ Usage
 
 ### Isolation-First Execution (Recommended)
@@ -243,8 +260,20 @@ Optional flags:
 sentinel-isolate \
   --workspace ./sandbox-workspace \
   --policy ./sentinel.yaml \
+  --seccomp-mode enforce \
   --network none \
   -- python your_agent.py
+```
+
+Seccomp modes:
+- `--seccomp-mode enforce`: strict allowlist enforcement (recommended default).
+- `--seccomp-mode log`: complain mode (`SCMP_ACT_LOG` default action) for syscall debugging.
+- `--seccomp-mode off`: disables seccomp (`seccomp=unconfined`) for compatibility troubleshooting only.
+
+Debug tip for seccomp denials:
+
+```bash
+dmesg | tail -n 100
 ```
 
 ### In-Process Integration (Compatibility Mode)

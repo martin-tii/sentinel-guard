@@ -1,7 +1,9 @@
 import argparse
+import json
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
@@ -17,6 +19,7 @@ class IsolationConfig:
     workspace: str = "./sandbox-workspace"
     policy: str = "./sentinel.yaml"
     seccomp: str = "./seccomp/sentinel-seccomp.json"
+    seccomp_mode: str = "enforce"  # enforce | log | off
     network_mode: str = "none"
     pids_limit: int = 256
     memory: str = "512m"
@@ -89,7 +92,31 @@ def _ensure_image_available(cfg: IsolationConfig):
         raise IsolationError(f"Failed to build image '{cfg.image}'.")
 
 
-def build_docker_run_command(command: Sequence[str], cfg: Optional[IsolationConfig] = None) -> list[str]:
+def _build_log_seccomp_profile(base_profile: Path) -> Path:
+    try:
+        raw = json.loads(base_profile.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise IsolationError(f"Failed to parse seccomp profile for log mode: {base_profile} ({exc})")
+
+    if not isinstance(raw, dict):
+        raise IsolationError("Seccomp profile must be a JSON object.")
+
+    raw["defaultAction"] = "SCMP_ACT_LOG"
+    tmp = tempfile.NamedTemporaryFile(prefix="sentinel-seccomp-log-", suffix=".json", delete=False)
+    try:
+        with open(tmp.name, "w", encoding="utf-8") as fh:
+            json.dump(raw, fh)
+    finally:
+        tmp.close()
+    return Path(tmp.name)
+
+
+def build_docker_run_command(
+    command: Sequence[str],
+    cfg: Optional[IsolationConfig] = None,
+    *,
+    seccomp_profile_override: Optional[Path] = None,
+) -> list[str]:
     if cfg is None:
         cfg = IsolationConfig()
     if not command:
@@ -101,11 +128,12 @@ def build_docker_run_command(command: Sequence[str], cfg: Optional[IsolationConf
 
     _ensure_existing_dir(workspace, "Workspace")
     _ensure_existing_file(policy, "Policy file")
-    _ensure_existing_file(seccomp, "Seccomp profile")
 
     if cfg.network_mode not in ("none", "bridge", "host"):
         raise IsolationError("network_mode must be one of: none, bridge, host")
     _enforce_production_network_policy(cfg)
+    if cfg.seccomp_mode not in ("enforce", "log", "off"):
+        raise IsolationError("seccomp_mode must be one of: enforce, log, off")
 
     run_cmd = [
         cfg.docker_binary,
@@ -116,8 +144,6 @@ def build_docker_run_command(command: Sequence[str], cfg: Optional[IsolationConf
         "ALL",
         "--security-opt",
         "no-new-privileges:true",
-        "--security-opt",
-        f"seccomp={seccomp}",
         "--pids-limit",
         str(cfg.pids_limit),
         "--memory",
@@ -136,8 +162,16 @@ def build_docker_run_command(command: Sequence[str], cfg: Optional[IsolationConf
         f"{policy}:/workspace/sentinel.yaml:ro",
         "--workdir",
         "/workspace",
-        cfg.image,
     ]
+
+    if cfg.seccomp_mode == "off":
+        run_cmd.extend(["--security-opt", "seccomp=unconfined"])
+    else:
+        effective_seccomp = seccomp_profile_override or seccomp
+        _ensure_existing_file(effective_seccomp, "Seccomp profile")
+        run_cmd.extend(["--security-opt", f"seccomp={effective_seccomp}"])
+
+    run_cmd.append(cfg.image)
     run_cmd.extend(command)
     return run_cmd
 
@@ -153,14 +187,27 @@ def run_isolated(
 
     _ensure_docker_available(cfg.docker_binary)
     _ensure_image_available(cfg)
-    run_cmd = build_docker_run_command(command, cfg)
+    seccomp_override = None
+    if cfg.seccomp_mode == "log":
+        seccomp_path = _resolve_path(cfg.seccomp)
+        _ensure_existing_file(seccomp_path, "Seccomp profile")
+        seccomp_override = _build_log_seccomp_profile(seccomp_path)
 
-    result = subprocess.run(run_cmd)
-    if check and result.returncode != 0:
-        raise IsolationError(
-            f"Isolated command failed with return code {result.returncode}."
-        )
-    return result
+    run_cmd = build_docker_run_command(command, cfg, seccomp_profile_override=seccomp_override)
+
+    try:
+        result = subprocess.run(run_cmd)
+        if check and result.returncode != 0:
+            raise IsolationError(
+                f"Isolated command failed with return code {result.returncode}."
+            )
+        return result
+    finally:
+        if seccomp_override is not None:
+            try:
+                seccomp_override.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _parse_args(argv: Optional[Sequence[str]] = None):
@@ -181,6 +228,12 @@ def _parse_args(argv: Optional[Sequence[str]] = None):
         "--seccomp",
         default="./seccomp/sentinel-seccomp.json",
         help="Seccomp profile file.",
+    )
+    parser.add_argument(
+        "--seccomp-mode",
+        default=os.environ.get("SENTINEL_SECCOMP_MODE", "enforce"),
+        choices=["enforce", "log", "off"],
+        help="Seccomp mode: enforce (strict), log (complain/audit), or off.",
     )
     parser.add_argument(
         "--image",
@@ -219,6 +272,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         workspace=args.workspace,
         policy=args.policy,
         seccomp=args.seccomp,
+        seccomp_mode=args.seccomp_mode,
         network_mode=args.network,
         build_if_missing=args.build_if_missing,
     )
