@@ -7,6 +7,7 @@ import urllib.request as urllib_request
 import http.client as http_client
 import socket
 import io
+import types
 from pathlib import Path
 import builtins
 from subprocess import Popen as captured_popen
@@ -24,6 +25,21 @@ from src.core import (
 from src.policy import PolicyEnforcer
 
 activate_sentinel()
+
+# Make runtime AI adjudication deterministic for this verification script.
+# This avoids flaky failures when local model output is empty/unavailable while
+# still testing Sentinel's policy/interceptor behavior.
+_original_call_ollama = core.ai_judge.call_ollama
+
+
+def _deterministic_call_ollama(self, prompt):
+    prompt_text = str(prompt)
+    if "You are a security policy judge for AI tool actions." in prompt_text:
+        return {"ok": True, "response": "SAFE: verification-mode deterministic allow"}
+    return _original_call_ollama(prompt)
+
+
+core.ai_judge.call_ollama = types.MethodType(_deterministic_call_ollama, core.ai_judge)
 
 print("--- 🛡️ VERIFICATION START ---")
 
@@ -434,5 +450,8 @@ if fake_workspace_dir.exists() and fake_workspace_dir.is_dir():
     except Exception as e:
         clear_approval_handler()
         print(f"\n[TEARDOWN] Could not remove {fake_workspace_dir}: {e}")
+
+# Restore original judge behavior before exit.
+core.ai_judge.call_ollama = _original_call_ollama
 
 print("\n--- 🛡️ VERIFICATION END ---")

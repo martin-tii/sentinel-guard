@@ -28,7 +28,29 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
 - Docker Compose v2 (`docker compose`)
 - Docker daemon running (Docker Desktop started, or `dockerd` active)
 
-### Quickstart
+### Non-Technical Quickstart (Recommended)
+
+1. Install Docker Desktop and open it until it shows the engine is running.
+2. Download this project and unzip it.
+3. Open Terminal in the project folder.
+4. Run:
+
+```bash
+./run_demo.sh
+```
+
+What this does:
+- Builds the secure sandbox image (first run can take a few minutes).
+- Runs Sentinel in strict mode (network disabled by default).
+- Shows blocking/approval behavior from the demo agent.
+
+If you need internet access for a specific test, run:
+
+```bash
+./run_demo.sh --standard
+```
+
+### Developer Quickstart
 
 One-command demo:
 
@@ -61,6 +83,12 @@ Run an arbitrary agent command in isolated mode (recommended):
 ```bash
 sentinel-isolate --build-if-missing -- python your_agent.py
 ```
+
+### Quick Troubleshooting
+
+- `Docker is not installed`: install Docker Desktop, then retry.
+- `Docker daemon is not running`: open Docker Desktop and wait for startup.
+- `docker compose ... not available`: update Docker Desktop to a recent version.
 
 ## 🧪 Local Development Setup
 
