@@ -10,8 +10,8 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
     *   **Keyword Filtering**: Blocks legacy prompt injection patterns.
     *   **AI Judge (New)**: Uses **LlamaGuard 3** to semantically analyze input for malicious intent.
 2.  **The Jail (Runtime Isolation)**
-    *   Restricts file system access to a specific `./workspace`.
-    *   Blocks access to sensitive files like `.env`, `.ssh`, and system directories.
+    *   **Isolation-First Mode (New)**: Run untrusted agent commands in a separate Docker sandbox via `sentinel-isolate`.
+    *   In-process monkey patches remain available for compatibility, but are not a hard security boundary.
 3.  **The Governor (Action Firewall)**
     *   **Action Interception**: Patches `subprocess.run`, `subprocess.Popen`, `os.system`, `requests` session requests, `urllib.request.urlopen`, `http.client` requests, and `builtins.open`.
     *   **Optional Socket Fail-Safe (V2)**: Can patch `socket.socket.connect` as a low-level fallback for non-standard clients.
@@ -20,7 +20,7 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
     *   **Phishing Guard (New)**: Heuristic detection of suspicious URLs and brand impersonation.
     *   **Smart Heuristics**: Blocks dangerous patterns like `wget | sh` or destructive shell chaining.
 
-## 🚀 Getting Started (Docker Sandbox)
+## 🚀 Getting Started (Isolation-First)
 
 ### Prerequisites
 
@@ -52,6 +52,12 @@ Run strict sandbox mode (no container networking):
 
 ```bash
 docker compose --profile strict run --rm sentinel-strict
+```
+
+Run an arbitrary agent command in isolated mode (recommended):
+
+```bash
+sentinel-isolate --build-if-missing -- python your_agent.py
 ```
 
 ## 🧪 Local Development Setup
@@ -115,9 +121,9 @@ blocked_command_bases:
   - "bash"
   - "sh"
 
-# 🌐 OPTIONAL SOCKET FAIL-SAFE (V2)
+# 🌐 SOCKET FAIL-SAFE (V2)
 network_failsafe:
-  socket_connect: false      # enable to patch socket.socket.connect
+  socket_connect: true       # enabled by default for low-level egress checks
   allow_private_network: false
   blocked_hosts: []          # optional host/domain denylist
   blocked_ips: []            # optional IP/CIDR denylist
@@ -145,7 +151,25 @@ then falls back to file-based `sentinel.yaml` if env YAML is invalid.
 
 ## 🕹️ Usage
 
-### Integrating with an Agent
+### Isolation-First Execution (Recommended)
+
+```bash
+# Runs in a separate container with read-only rootfs, dropped caps,
+# no-new-privileges, seccomp profile, and network disabled by default.
+sentinel-isolate --build-if-missing -- python your_agent.py
+```
+
+Optional flags:
+
+```bash
+sentinel-isolate \
+  --workspace ./sandbox-workspace \
+  --policy ./sentinel.yaml \
+  --network none \
+  -- python your_agent.py
+```
+
+### In-Process Integration (Compatibility Mode)
 
 ```python
 from src.core import (
@@ -156,7 +180,7 @@ from src.core import (
   console_approval_handler,
 )
 
-# 🛡️ Activate protections early
+# 🛡️ Activate protections early (compatibility mode only)
 activate_sentinel()
 # Safe to call more than once (idempotent)
 activate_sentinel()
@@ -172,6 +196,10 @@ subprocess.run("rm -rf /", shell=True)
 # Restore original runtime behavior when needed
 deactivate_sentinel()
 ```
+
+Compatibility mode note:
+- In-process hooks improve safety but cannot provide zero-breach guarantees against code that can execute in the same interpreter.
+- Use `sentinel-isolate` for hard process/container boundaries.
 
 ### Standard Integration Pattern (Moltbot / Any Agent)
 

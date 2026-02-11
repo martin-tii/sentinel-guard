@@ -1,9 +1,15 @@
-# Deployment Guide
+# Deployment Guide (Isolation-First)
 
 This repository includes a containerized "Sentinel Sandbox" deployment that combines:
 
 1. Application guardrails (Python policy engine)
 2. Container hardening (read-only rootfs, dropped capabilities, seccomp, no-new-privileges)
+
+For hard isolation of untrusted agents, prefer the dedicated runner:
+
+```bash
+sentinel-isolate --build-if-missing -- python your_agent.py
+```
 
 ## Files
 
@@ -41,6 +47,16 @@ Disables all container networking (`network_mode: none`) as an OS-level fail-saf
 docker compose --profile strict run --rm sentinel-strict
 ```
 
+### 3) Isolated Arbitrary Command (Recommended)
+
+```bash
+sentinel-isolate \
+  --workspace ./sandbox-workspace \
+  --policy ./sentinel.yaml \
+  --network none \
+  -- python your_agent.py
+```
+
 ## Sandbox Workspace
 
 Host directory `./sandbox-workspace` is mounted to `/workspace` in the container.
@@ -59,9 +75,9 @@ Host directory `./sandbox-workspace` is mounted to `/workspace` in the container
 - `tmpfs` for `/tmp` and `/run`
 - process/memory/CPU limits
 
-## Optional Socket Fail-Safe
+## Socket Fail-Safe (Default On)
 
-If you want low-level network interception across more libraries, enable in policy:
+Low-level network interception across non-HTTP libraries is enabled by default:
 
 ```yaml
 network_failsafe:

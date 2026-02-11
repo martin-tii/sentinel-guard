@@ -11,4 +11,9 @@ setup(
     ],
     author="Sentinel Team",
     description="Security middleware for AI Agents",
+    entry_points={
+        "console_scripts": [
+            "sentinel-isolate=src.isolation:main",
+        ],
+    },
 )
