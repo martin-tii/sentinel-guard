@@ -6,6 +6,8 @@ import socket
 import ipaddress
 import hashlib
 import hmac
+import threading
+import time
 from urllib.parse import urlparse
 from pathlib import Path
 from .utils import audit
@@ -25,11 +27,19 @@ class PolicyEnforcer:
         self._expected_policy_sha = ""
         self._expected_policy_hmac = ""
         self._expected_policy_hmac_key = ""
+        self._dns_cache = {}
+        self._dns_cache_lock = threading.Lock()
         self._production_mode = self._truthy(os.environ.get("SENTINEL_PRODUCTION", ""))
         self._immutable_policy_enabled = self._truthy(os.environ.get("SENTINEL_POLICY_IMMUTABLE", ""))
         self._expected_policy_sha = str(os.environ.get("SENTINEL_POLICY_SHA256", "")).strip().lower()
         self._expected_policy_hmac = str(os.environ.get("SENTINEL_POLICY_HMAC_SHA256", "")).strip().lower()
         self._expected_policy_hmac_key = str(os.environ.get("SENTINEL_POLICY_HMAC_KEY", ""))
+        self._dns_cache_ttl_seconds = max(
+            0.0, self._float_env("SENTINEL_DNS_CACHE_TTL_SECONDS", 2.0)
+        )
+        self._dns_resolve_timeout_ms = max(
+            0.0, self._float_env("SENTINEL_DNS_RESOLVE_TIMEOUT_MS", 1000.0)
+        )
         if self._expected_policy_hmac:
             self._signature_mode = "hmac"
         elif self._expected_policy_sha:
@@ -52,6 +62,15 @@ class PolicyEnforcer:
 
     def _truthy(self, value):
         return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+    def _float_env(self, name, default):
+        raw = os.environ.get(name)
+        if raw is None:
+            return float(default)
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return float(default)
 
     def _sha256_hex(self, text):
         return hashlib.sha256(str(text).encode("utf-8")).hexdigest()
@@ -435,7 +454,7 @@ class PolicyEnforcer:
                 return True
         return False
 
-    def _resolve_host_ips(self, host):
+    def _resolve_host_ips_uncached(self, host):
         resolved = set()
         try:
             ip_obj = ipaddress.ip_address(host)
@@ -458,6 +477,50 @@ class PolicyEnforcer:
         except Exception:
             return resolved
         return resolved
+
+    def _resolve_host_ips_with_timeout(self, host):
+        timeout_seconds = self._dns_resolve_timeout_ms / 1000.0
+        if timeout_seconds <= 0.0:
+            return self._resolve_host_ips_uncached(host), False
+
+        result = {"ips": set()}
+
+        def _worker():
+            result["ips"] = self._resolve_host_ips_uncached(host)
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        thread.join(timeout_seconds)
+        if thread.is_alive():
+            return None, True
+        return result["ips"], False
+
+    def _resolve_host_ips(self, host):
+        try:
+            return {ipaddress.ip_address(host)}
+        except ValueError:
+            pass
+
+        now = time.monotonic()
+        cached_ips = None
+        with self._dns_cache_lock:
+            entry = self._dns_cache.get(host)
+            if entry is not None:
+                ts, ips = entry
+                if (now - ts) <= self._dns_cache_ttl_seconds:
+                    return set(ips)
+                cached_ips = set(ips)
+
+        resolved, timed_out = self._resolve_host_ips_with_timeout(host)
+        if timed_out:
+            audit("SOCKET_CONNECT", f"{host}:* DNS resolve timed out; using cached resolution if available.", "WARNING")
+            return cached_ips or set()
+
+        if resolved is not None:
+            with self._dns_cache_lock:
+                self._dns_cache[host] = (time.monotonic(), set(resolved))
+            return resolved
+        return cached_ips or set()
 
     def _ip_matches_any_rule(self, ip_obj, rules):
         for rule in rules:

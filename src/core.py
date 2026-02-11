@@ -4,6 +4,7 @@ import io
 import os
 import pathlib
 import random
+import threading
 import subprocess
 import requests # Assuming requests is used, we'll patch it
 import urllib.request as urllib_request
@@ -72,25 +73,26 @@ def _integrity_sample_rate():
 
 def _should_run_integrity_check(force=False):
     global _last_integrity_check_at
-    if force:
-        _last_integrity_check_at = time.monotonic()
-        return True
+    with _integrity_schedule_lock:
+        if force:
+            _last_integrity_check_at = time.monotonic()
+            return True
 
-    sample_rate = _integrity_sample_rate()
-    if sample_rate > 0.0 and random.random() < sample_rate:
-        _last_integrity_check_at = time.monotonic()
-        return True
+        sample_rate = _integrity_sample_rate()
+        if sample_rate > 0.0 and random.random() < sample_rate:
+            _last_integrity_check_at = time.monotonic()
+            return True
 
-    interval = _integrity_interval_seconds()
-    if interval <= 0:
-        _last_integrity_check_at = time.monotonic()
-        return True
+        interval = _integrity_interval_seconds()
+        if interval <= 0:
+            _last_integrity_check_at = time.monotonic()
+            return True
 
-    now = time.monotonic()
-    if (now - _last_integrity_check_at) >= interval:
-        _last_integrity_check_at = now
-        return True
-    return False
+        now = time.monotonic()
+        if (now - _last_integrity_check_at) >= interval:
+            _last_integrity_check_at = now
+            return True
+        return False
 
 # --- Interceptors ---
 
@@ -498,6 +500,7 @@ _socket_patch_active = False
 _integrity_check_in_progress = False
 _expected_runtime_bindings = {}
 _last_integrity_check_at = 0.0
+_integrity_schedule_lock = threading.Lock()
 
 
 def _is_production_mode():
@@ -868,6 +871,11 @@ def activate_sentinel():
     _last_integrity_check_at = 0.0
     _assert_production_integrity_requirements()
     audit("SYSTEM", "Sentinel Activated. Monitoring engaged.", "INFO")
+    audit(
+        "SYSTEM",
+        "Compatibility mode active: runtime hooks are guardrails, not a hard isolation boundary.",
+        "WARNING",
+    )
 
     # Monkey Patching
     builtins.open = sentinel_open

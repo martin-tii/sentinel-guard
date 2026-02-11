@@ -24,6 +24,8 @@ class IsolationConfig:
     pids_limit: int = 256
     memory: str = "512m"
     cpus: str = "1.0"
+    proxy: str = ""
+    no_proxy: str = ""
     build_if_missing: bool = False
     docker_binary: str = "docker"
 
@@ -164,6 +166,16 @@ def build_docker_run_command(
         "/workspace",
     ]
 
+    if cfg.proxy:
+        run_cmd.extend(["--env", f"HTTP_PROXY={cfg.proxy}"])
+        run_cmd.extend(["--env", f"HTTPS_PROXY={cfg.proxy}"])
+        run_cmd.extend(["--env", f"http_proxy={cfg.proxy}"])
+        run_cmd.extend(["--env", f"https_proxy={cfg.proxy}"])
+        no_proxy = cfg.no_proxy or os.environ.get("NO_PROXY") or os.environ.get("no_proxy", "")
+        if no_proxy:
+            run_cmd.extend(["--env", f"NO_PROXY={no_proxy}"])
+            run_cmd.extend(["--env", f"no_proxy={no_proxy}"])
+
     if cfg.seccomp_mode == "off":
         run_cmd.extend(["--security-opt", "seccomp=unconfined"])
     else:
@@ -247,6 +259,16 @@ def _parse_args(argv: Optional[Sequence[str]] = None):
         help="Container network mode. Use 'none' for strongest isolation.",
     )
     parser.add_argument(
+        "--proxy",
+        default=os.environ.get("SENTINEL_PROXY", ""),
+        help="Optional outbound proxy URL passed as HTTP(S)_PROXY inside the container.",
+    )
+    parser.add_argument(
+        "--no-proxy",
+        default=os.environ.get("SENTINEL_NO_PROXY", ""),
+        help="Optional NO_PROXY value to pass into container when --proxy is used.",
+    )
+    parser.add_argument(
         "--build-if-missing",
         action="store_true",
         help="Build the image if it does not exist locally.",
@@ -274,6 +296,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         seccomp=args.seccomp,
         seccomp_mode=args.seccomp_mode,
         network_mode=args.network,
+        proxy=args.proxy,
+        no_proxy=args.no_proxy,
         build_if_missing=args.build_if_missing,
     )
     result = run_isolated(command, cfg, check=False)

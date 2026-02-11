@@ -102,6 +102,29 @@ class IsolationCommandBuildTests(unittest.TestCase):
             with self.assertRaises(IsolationError):
                 build_docker_run_command(["python", "app.py"], cfg)
 
+    def test_proxy_env_is_propagated(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+            seccomp = tmp / "seccomp.json"
+            seccomp.write_text("{}", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(seccomp),
+                proxy="http://proxy.local:8080",
+                no_proxy="localhost,127.0.0.1",
+            )
+            cmd = build_docker_run_command(["python", "app.py"], cfg)
+            joined = " ".join(cmd)
+            self.assertIn("HTTP_PROXY=http://proxy.local:8080", joined)
+            self.assertIn("HTTPS_PROXY=http://proxy.local:8080", joined)
+            self.assertIn("NO_PROXY=localhost,127.0.0.1", joined)
+
 
 if __name__ == "__main__":
     unittest.main()

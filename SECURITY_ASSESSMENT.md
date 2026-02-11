@@ -28,6 +28,7 @@ Last updated: 2026-02-11.
 - Host policy now supports strict exact-match mode and optional per-host scheme/port constraints.
 - Runtime tamper detection verifies critical hook bindings and fails closed on drift.
 - Runtime tamper detection now supports interval/sampling cadence controls to reduce hot-path overhead.
+- Runtime tamper-check scheduling is lock-protected to avoid multi-thread timing races.
 - Startup attestation output is emitted at activation with policy/integrity state.
 - High-assurance policy controls now support SHA256/HMAC verification and runtime immutability checks.
 - Production mode enforces signed policy verification + immutable policy checks.
@@ -47,6 +48,8 @@ Last updated: 2026-02-11.
 - Immutable/signed policy options are implemented, with production-mode hard-fail requirements.
 - Production isolated execution blocks networked mode unless an explicit exception flag is set.
 - Isolation runner now supports `enforce/log/off` seccomp modes for secure-by-default operation with explicit debugging fallback.
+- Isolation runner supports proxy environment injection for egress-control deployments.
+- Socket fail-safe DNS resolution now includes TTL caching and bounded timeout controls.
 
 ### Remaining Risks and Gaps
 
@@ -112,10 +115,11 @@ Impact:
 3. Add formal policy verification and drift alerting integration.
 
 ## Deployment Guidance
-- Treat compatibility mode as guardrails, not containment.
+- Treat compatibility mode as guardrails for buggy/accidental behavior, not containment against determined malicious code.
 - For untrusted agent workloads, run via `sentinel-isolate`.
 - Keep `allowed_commands`, `allowed_paths`, and `allowed_hosts` minimal.
 - Prefer deny-by-default network and open only specific destinations.
+- Prefer explicit egress control (proxy/firewall) for networked isolated workloads.
 - Ensure audit logs are exported/collected outside the guarded process for integrity.
 
 ## Residual Risk Statement

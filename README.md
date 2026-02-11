@@ -237,11 +237,28 @@ export SENTINEL_TAMPER_CHECK_INTERVAL_MS=250
 export SENTINEL_TAMPER_CHECK_SAMPLE_RATE=0.0
 ```
 
+DNS/socket failsafe tuning:
+
+```bash
+# Cache DNS resolutions used by socket fail-safe checks (seconds).
+export SENTINEL_DNS_CACHE_TTL_SECONDS=2
+
+# Best-effort cap for DNS resolve wait per lookup (milliseconds).
+export SENTINEL_DNS_RESOLVE_TIMEOUT_MS=1000
+```
+
 Isolation seccomp mode control:
 
 ```bash
 # enforce (default) | log (complain mode) | off
 export SENTINEL_SECCOMP_MODE=enforce
+```
+
+Optional proxy injection for isolated runs:
+
+```bash
+export SENTINEL_PROXY=http://proxy.internal:8080
+export SENTINEL_NO_PROXY=localhost,127.0.0.1,.svc.cluster.local
 ```
 
 ## 🕹️ Usage
@@ -260,6 +277,8 @@ Optional flags:
 sentinel-isolate \
   --workspace ./sandbox-workspace \
   --policy ./sentinel.yaml \
+  --proxy http://proxy.internal:8080 \
+  --no-proxy localhost,127.0.0.1 \
   --seccomp-mode enforce \
   --network none \
   -- python your_agent.py
@@ -267,7 +286,7 @@ sentinel-isolate \
 
 Seccomp modes:
 - `--seccomp-mode enforce`: strict allowlist enforcement (recommended default).
-- `--seccomp-mode log`: complain mode (`SCMP_ACT_LOG` default action) for syscall debugging.
+- `--seccomp-mode log`: complain mode (`SCMP_ACT_LOG` default action) for syscall debugging. Use this first when onboarding new workloads, then tighten to `enforce`.
 - `--seccomp-mode off`: disables seccomp (`seccomp=unconfined`) for compatibility troubleshooting only.
 
 Debug tip for seccomp denials:
@@ -305,7 +324,7 @@ deactivate_sentinel()
 ```
 
 Compatibility mode note:
-- In-process hooks improve safety but cannot provide zero-breach guarantees against code that can execute in the same interpreter.
+- In-process hooks are guardrails for accidental or buggy behavior, not full containment against determined malicious code.
 - Use `sentinel-isolate` for hard process/container boundaries.
 
 ### Standard Integration Pattern (Moltbot / Any Agent)

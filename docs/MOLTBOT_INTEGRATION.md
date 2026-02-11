@@ -111,6 +111,15 @@ sentinel-isolate --seccomp-mode log --build-if-missing -- python moltbot.py
 dmesg | tail -n 100
 ```
 
+If Moltbot needs outbound web access through a controlled egress path:
+
+```bash
+sentinel-isolate \
+  --proxy http://proxy.internal:8080 \
+  --no-proxy localhost,127.0.0.1 \
+  --build-if-missing -- python moltbot.py
+```
+
 ## Troubleshooting
 
 ### `ModuleNotFoundError` or import errors

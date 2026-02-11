@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import unittest
 
 
@@ -59,6 +60,36 @@ class NetworkPolicyTests(unittest.TestCase):
         self.assertTrue(enforcer.check_socket_connect("api.openai.com", 443))
         with self.assertRaises(PermissionError):
             enforcer.check_socket_connect("api.openai.com", 80)
+
+    def test_dns_timeout_uses_cached_resolution(self):
+        enforcer = self._policy()
+        enforcer._dns_cache_ttl_seconds = 60.0
+        enforcer._dns_resolve_timeout_ms = 5.0
+        enforcer._dns_cache["api.openai.com"] = (time.monotonic(), set())
+
+        class FakeIP:
+            is_private = False
+            is_loopback = False
+            is_link_local = False
+
+            def __str__(self):
+                return "203.0.113.10"
+
+        cached_ip = FakeIP()
+        enforcer._dns_cache["api.openai.com"] = (time.monotonic(), {cached_ip})
+
+        def slow_resolve(_host):
+            time.sleep(0.05)
+            return {cached_ip}
+
+        original = enforcer._resolve_host_ips_uncached
+        enforcer._resolve_host_ips_uncached = slow_resolve
+        try:
+            resolved = enforcer._resolve_host_ips("api.openai.com")
+        finally:
+            enforcer._resolve_host_ips_uncached = original
+
+        self.assertTrue(resolved)
 
 
 if __name__ == "__main__":

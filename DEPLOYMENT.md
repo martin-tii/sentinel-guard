@@ -64,6 +64,8 @@ docker compose --profile standard run --rm sentinel-standard
 sentinel-isolate \
   --workspace ./sandbox-workspace \
   --policy ./sentinel.yaml \
+  --proxy http://proxy.internal:8080 \
+  --no-proxy localhost,127.0.0.1 \
   --seccomp-mode enforce \
   --network none \
   -- python your_agent.py
@@ -72,7 +74,7 @@ sentinel-isolate \
 Seccomp troubleshooting modes:
 
 - `--seccomp-mode enforce` (default): strict allowlist enforcement.
-- `--seccomp-mode log`: complain/audit mode (`SCMP_ACT_LOG` default action).
+- `--seccomp-mode log`: complain/audit mode (`SCMP_ACT_LOG` default action). Use this first for new workloads, then move to `enforce`.
 - `--seccomp-mode off`: disable seccomp (`seccomp=unconfined`) for break-glass troubleshooting only.
 
 You can also set `SENTINEL_SECCOMP_MODE=enforce|log|off`.
@@ -110,6 +112,20 @@ export SENTINEL_TAMPER_CHECK_INTERVAL_MS=250
 
 # Optional additional random deep-check sampling [0.0..1.0]
 export SENTINEL_TAMPER_CHECK_SAMPLE_RATE=0.0
+```
+
+DNS/socket failsafe tuning:
+
+```bash
+export SENTINEL_DNS_CACHE_TTL_SECONDS=2
+export SENTINEL_DNS_RESOLVE_TIMEOUT_MS=1000
+```
+
+Proxy injection into isolated containers:
+
+```bash
+export SENTINEL_PROXY=http://proxy.internal:8080
+export SENTINEL_NO_PROXY=localhost,127.0.0.1,.svc.cluster.local
 ```
 
 ## Socket Fail-Safe (Default On)
