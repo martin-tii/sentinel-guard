@@ -30,7 +30,7 @@ phishing:
 
 # Optional V2 socket-level network guard (default off).
 network_failsafe:
-  socket_connect: false
+  socket_connect: true
   allow_private_network: false
   blocked_hosts: []
   blocked_ips: []

@@ -6,8 +6,8 @@ setup(
     version="1.0.0",
     packages=find_packages(),
     install_requires=[
-        "requests",
-        "pyyaml",
+        "requests==2.32.3",
+        "PyYAML==6.0.2",
     ],
     author="Sentinel Team",
     description="Security middleware for AI Agents",

