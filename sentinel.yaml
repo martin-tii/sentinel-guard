@@ -14,3 +14,18 @@ allowed_hosts:
 
 blocked_keywords:
   - "ignore previous instructions"
+
+judge:
+  enabled: true
+  provider: "ollama"
+  model: "llama-guard3"
+  endpoint: "http://localhost:11434/api/generate"
+  risk_threshold: 0.7
+
+# 🎣 ANTI-PHISHING & SANDBOX EVENTS
+phishing:
+  enabled: true
+  suspicious_keywords: ["login", "verify", "update", "bank", "wallet"]
+  blocked_tlds: [".xyz", ".top", ".gq", ".zip"] 
+
+  
