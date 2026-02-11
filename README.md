@@ -26,6 +26,7 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
 
 - Docker Engine
 - Docker Compose v2 (`docker compose`)
+- Docker daemon running (Docker Desktop started, or `dockerd` active)
 
 ### Quickstart
 
@@ -59,21 +60,20 @@ docker compose --profile strict run --rm sentinel-strict
 
 - Python 3.11+
 - [Ollama](https://ollama.com/) (Required for AI Judge / LlamaGuard 3)
-- Conda (Recommended)
+- pip
 
 ### Installation
 
-1.  Clone the repository:
+1.  Install from package:
+    ```bash
+    pip install sentinel-guard
+    ```
+
+2.  Optional (development from source):
     ```bash
     git clone https://github.com/yourusername/sentinel-guard.git
     cd sentinel-guard
-    ```
-
-2.  Create and activate the environment:
-    ```bash
-    conda create -n sentinel-guard python=3.11 -y
-    conda activate sentinel-guard
-    pip install -r requirements.txt
+    pip install -e .
     ```
 
 3.  Ensure Ollama is running LlamaGuard:
@@ -151,6 +151,40 @@ import subprocess
 subprocess.run("rm -rf /", shell=True)
 
 # Restore original runtime behavior when needed
+deactivate_sentinel()
+```
+
+### Standard Integration Pattern (Moltbot / Any Agent)
+
+Install Sentinel in the same environment as the agent:
+
+```bash
+pip install sentinel-guard
+```
+
+Recommended startup pattern:
+
+```python
+# 1) Initialize guardrails before any tool/network/file calls.
+from src.core import activate_sentinel, set_approval_handler, tkinter_approval_handler
+
+activate_sentinel()
+set_approval_handler(tkinter_approval_handler)
+
+# 2) Run your agent loop normally.
+def run_agent(agent):
+    while True:
+        task = agent.next_task()
+        if task is None:
+            break
+        agent.handle(task)
+```
+
+Recommended shutdown pattern:
+
+```python
+from src.core import deactivate_sentinel
+
 deactivate_sentinel()
 ```
 
@@ -246,6 +280,37 @@ python examples/smart_test.py
 ## 📝 Audit Logging
 
 All actions are logged to `audit.log` for real-time monitoring and forensics.
+
+## 🤖 Integration with Moltbot (or any Agent)
+
+There are two ways to protect your agent.
+
+### Method A: The Wrapper (Recommended)
+
+Use this method to protect an agent without modifying its source code.
+
+1. Install Sentinel:
+   ```bash
+   pip install -e .
+   ```
+
+2. Run your agent via the wrapper:
+   ```bash
+   python examples/moltbot_wrapper.py
+   ```
+
+### Method B: Direct Code Injection
+
+Add these lines to the very top of your agent's entry point (for example, `main.py`):
+
+```python
+from src.core import activate_sentinel
+
+# Must be the first thing that runs!
+activate_sentinel()
+
+# ... rest of your agent code ...
+```
 
 ## 🚢 Deployment
 
