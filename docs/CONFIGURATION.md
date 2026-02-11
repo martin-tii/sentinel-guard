@@ -83,12 +83,15 @@ export SENTINEL_DNS_RESOLVE_TIMEOUT_MS=1000
 ### Isolation-Mode Controls
 
 ```bash
+export SENTINEL_SECCOMP_PROFILE=strict  # strict | datasci | custom
 export SENTINEL_SECCOMP_MODE=enforce   # enforce | log | off
 export SENTINEL_PROXY=http://proxy.internal:8080
 export SENTINEL_NO_PROXY=localhost,127.0.0.1,.svc.cluster.local
+export SENTINEL_ENFORCE_PROXY=true
 ```
 
 ## Notes
 
 - In production mode, signed + immutable policy settings are required.
 - In production isolated runs, networked mode is blocked unless `SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true` is set.
+- In compatibility mode, DNS checks can still have TOCTOU/rebinding risk; use isolation mode for hard boundaries.

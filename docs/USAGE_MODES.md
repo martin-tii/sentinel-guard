@@ -16,14 +16,19 @@ sentinel-isolate --build-if-missing -- python your_agent.py
 sentinel-isolate \
   --workspace ./sandbox-workspace \
   --policy ./sentinel.yaml \
-  --network none \
+  --network bridge \
+  --enforce-proxy \
+  --proxy http://sentinel-proxy:3128 \
+  --seccomp-profile strict \
   --seccomp-mode enforce \
   -- python your_agent.py
 ```
 
 - `--network none|bridge|host`
+- `--enforce-proxy` requires a proxy for networked runs
+- `--proxy` / `--no-proxy` for controlled egress
+- `--seccomp-profile strict|datasci|custom`
 - `--seccomp-mode enforce|log|off`
-- `--proxy` / `--no-proxy` for controlled egress in networked runs
 
 ### Seccomp onboarding pattern
 
@@ -31,6 +36,8 @@ sentinel-isolate \
 2. Capture denied syscalls from kernel logs.
 3. Tune profile.
 4. Move back to `--seccomp-mode enforce`.
+
+For broader compatibility on scientific/ML stacks, use `--seccomp-profile datasci`.
 
 ## 2) Compatibility Mode (Guardrails in Same Process)
 
@@ -68,4 +75,10 @@ export SENTINEL_APPROVAL_MODE=auto   # auto | tkinter | console | reject
 
 ```bash
 pytest -q
+```
+
+Performance benchmark (tamper-check interval impact):
+
+```bash
+python scripts/benchmark_integrity.py
 ```

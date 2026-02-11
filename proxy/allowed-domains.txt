@@ -1,0 +1,6 @@
+.openai.com
+.pypi.org
+.pythonhosted.org
+.files.pythonhosted.org
+.github.com
+.raw.githubusercontent.com

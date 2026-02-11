@@ -115,7 +115,8 @@ If Moltbot needs outbound web access through a controlled egress path:
 
 ```bash
 sentinel-isolate \
-  --proxy http://proxy.internal:8080 \
+  --proxy http://sentinel-proxy:3128 \
+  --enforce-proxy \
   --no-proxy localhost,127.0.0.1 \
   --build-if-missing -- python moltbot.py
 ```

@@ -19,6 +19,7 @@ class IsolationConfig:
     workspace: str = "./sandbox-workspace"
     policy: str = "./sentinel.yaml"
     seccomp: str = "./seccomp/sentinel-seccomp.json"
+    seccomp_profile: str = "strict"  # strict | datasci | custom
     seccomp_mode: str = "enforce"  # enforce | log | off
     network_mode: str = "none"
     pids_limit: int = 256
@@ -26,6 +27,7 @@ class IsolationConfig:
     cpus: str = "1.0"
     proxy: str = ""
     no_proxy: str = ""
+    enforce_proxy: bool = False
     build_if_missing: bool = False
     docker_binary: str = "docker"
 
@@ -45,6 +47,39 @@ def _enforce_production_network_policy(cfg: IsolationConfig):
         "Production mode requires --network none. "
         "Set SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true to allow a networked exception."
     )
+
+
+def _enforce_proxy_policy(cfg: IsolationConfig):
+    if cfg.network_mode == "none":
+        return
+
+    enforce_proxy = cfg.enforce_proxy or _is_truthy(os.environ.get("SENTINEL_ENFORCE_PROXY", ""))
+    if not enforce_proxy:
+        return
+
+    if not str(cfg.proxy).strip():
+        raise IsolationError(
+            "Networked isolation with --enforce-proxy requires --proxy (or SENTINEL_PROXY)."
+        )
+
+
+def _default_seccomp_for_profile(profile: str) -> str:
+    mapping = {
+        "strict": "./seccomp/sentinel-seccomp.json",
+        "datasci": "./seccomp/sentinel-seccomp-datasci.json",
+    }
+    return mapping.get(profile, "./seccomp/sentinel-seccomp.json")
+
+
+def _effective_seccomp_path(cfg: IsolationConfig) -> str:
+    profile = str(cfg.seccomp_profile).strip().lower()
+    # Backward-compatible behavior: if user provided a non-default --seccomp path
+    # without selecting a profile, prefer that explicit path.
+    if profile == "strict" and cfg.seccomp != IsolationConfig.seccomp:
+        return cfg.seccomp
+    if profile in ("strict", "datasci"):
+        return _default_seccomp_for_profile(profile)
+    return cfg.seccomp
 
 
 def _repo_root() -> Path:
@@ -126,7 +161,8 @@ def build_docker_run_command(
 
     workspace = _resolve_path(cfg.workspace)
     policy = _resolve_path(cfg.policy)
-    seccomp = _resolve_path(cfg.seccomp)
+    seccomp_profile = str(cfg.seccomp_profile).strip().lower()
+    seccomp = _resolve_path(_effective_seccomp_path(cfg))
 
     _ensure_existing_dir(workspace, "Workspace")
     _ensure_existing_file(policy, "Policy file")
@@ -134,8 +170,11 @@ def build_docker_run_command(
     if cfg.network_mode not in ("none", "bridge", "host"):
         raise IsolationError("network_mode must be one of: none, bridge, host")
     _enforce_production_network_policy(cfg)
+    _enforce_proxy_policy(cfg)
     if cfg.seccomp_mode not in ("enforce", "log", "off"):
         raise IsolationError("seccomp_mode must be one of: enforce, log, off")
+    if seccomp_profile not in ("strict", "datasci", "custom"):
+        raise IsolationError("seccomp_profile must be one of: strict, datasci, custom")
 
     run_cmd = [
         cfg.docker_binary,
@@ -166,12 +205,13 @@ def build_docker_run_command(
         "/workspace",
     ]
 
-    if cfg.proxy:
-        run_cmd.extend(["--env", f"HTTP_PROXY={cfg.proxy}"])
-        run_cmd.extend(["--env", f"HTTPS_PROXY={cfg.proxy}"])
-        run_cmd.extend(["--env", f"http_proxy={cfg.proxy}"])
-        run_cmd.extend(["--env", f"https_proxy={cfg.proxy}"])
-        no_proxy = cfg.no_proxy or os.environ.get("NO_PROXY") or os.environ.get("no_proxy", "")
+    effective_proxy = str(cfg.proxy).strip() or str(os.environ.get("SENTINEL_PROXY", "")).strip()
+    if effective_proxy:
+        run_cmd.extend(["--env", f"HTTP_PROXY={effective_proxy}"])
+        run_cmd.extend(["--env", f"HTTPS_PROXY={effective_proxy}"])
+        run_cmd.extend(["--env", f"http_proxy={effective_proxy}"])
+        run_cmd.extend(["--env", f"https_proxy={effective_proxy}"])
+        no_proxy = str(cfg.no_proxy).strip() or os.environ.get("NO_PROXY") or os.environ.get("no_proxy", "")
         if no_proxy:
             run_cmd.extend(["--env", f"NO_PROXY={no_proxy}"])
             run_cmd.extend(["--env", f"no_proxy={no_proxy}"])
@@ -200,8 +240,10 @@ def run_isolated(
     _ensure_docker_available(cfg.docker_binary)
     _ensure_image_available(cfg)
     seccomp_override = None
+    seccomp_path_input = _effective_seccomp_path(cfg)
+
     if cfg.seccomp_mode == "log":
-        seccomp_path = _resolve_path(cfg.seccomp)
+        seccomp_path = _resolve_path(seccomp_path_input)
         _ensure_existing_file(seccomp_path, "Seccomp profile")
         seccomp_override = _build_log_seccomp_profile(seccomp_path)
 
@@ -239,7 +281,13 @@ def _parse_args(argv: Optional[Sequence[str]] = None):
     parser.add_argument(
         "--seccomp",
         default="./seccomp/sentinel-seccomp.json",
-        help="Seccomp profile file.",
+        help="Seccomp profile file path (used when --seccomp-profile custom).",
+    )
+    parser.add_argument(
+        "--seccomp-profile",
+        default=os.environ.get("SENTINEL_SECCOMP_PROFILE", "strict"),
+        choices=["strict", "datasci", "custom"],
+        help="Seccomp profile preset: strict, datasci, or custom path via --seccomp.",
     )
     parser.add_argument(
         "--seccomp-mode",
@@ -269,6 +317,11 @@ def _parse_args(argv: Optional[Sequence[str]] = None):
         help="Optional NO_PROXY value to pass into container when --proxy is used.",
     )
     parser.add_argument(
+        "--enforce-proxy",
+        action="store_true",
+        help="When network is enabled, require proxy configuration and fail otherwise.",
+    )
+    parser.add_argument(
         "--build-if-missing",
         action="store_true",
         help="Build the image if it does not exist locally.",
@@ -294,10 +347,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         workspace=args.workspace,
         policy=args.policy,
         seccomp=args.seccomp,
+        seccomp_profile=args.seccomp_profile,
         seccomp_mode=args.seccomp_mode,
         network_mode=args.network,
         proxy=args.proxy,
         no_proxy=args.no_proxy,
+        enforce_proxy=args.enforce_proxy,
         build_if_missing=args.build_if_missing,
     )
     result = run_isolated(command, cfg, check=False)

@@ -31,6 +31,12 @@ docker compose --profile strict run --rm sentinel-strict
 docker compose --profile standard run --rm sentinel-standard
 ```
 
+- Proxied (networked with sidecar egress control):
+
+```bash
+docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
+```
+
 - Arbitrary command in isolated sandbox:
 
 ```bash
@@ -49,3 +55,9 @@ dmesg | tail -n 100
 ```
 
 Then tighten back to `--seccomp-mode enforce` once syscall requirements are known.
+
+For ML/data-science workloads that need broader syscall coverage, use:
+
+```bash
+sentinel-isolate --seccomp-profile datasci --build-if-missing -- python your_agent.py
+```

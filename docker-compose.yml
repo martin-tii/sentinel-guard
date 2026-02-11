@@ -31,3 +31,32 @@ services:
     profiles: ["strict"]
     network_mode: "none"
     command: ["python", "/opt/sentinel/tests/verify_fixes.py"]
+
+  sentinel-proxy:
+    image: ubuntu/squid:latest
+    profiles: ["proxied"]
+    restart: unless-stopped
+    networks:
+      - sentinel-internal
+      - external-egress
+    volumes:
+      - ./proxy/squid.conf:/etc/squid/squid.conf:ro
+      - ./proxy/allowed-domains.txt:/etc/squid/allowed-domains.txt:ro
+
+  sentinel-proxied:
+    <<: *sentinel-common
+    profiles: ["proxied"]
+    depends_on:
+      - sentinel-proxy
+    networks:
+      - sentinel-internal
+    environment:
+      HTTP_PROXY: "http://sentinel-proxy:3128"
+      HTTPS_PROXY: "http://sentinel-proxy:3128"
+      NO_PROXY: "localhost,127.0.0.1,sentinel-proxy"
+    command: ["python", "/opt/sentinel/tests/verify_fixes.py"]
+
+networks:
+  sentinel-internal:
+    internal: true
+  external-egress:

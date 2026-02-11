@@ -25,8 +25,11 @@ In production mode, `sentinel-isolate` enforces `--network none` unless
 ## Files
 
 - `Dockerfile`: builds the Sentinel runtime image
-- `docker-compose.yml`: hardened run profiles (`standard`, `strict`)
+- `docker-compose.yml`: hardened run profiles (`standard`, `strict`, `proxied`)
 - `seccomp/sentinel-seccomp.json`: additional syscall deny rules
+- `seccomp/sentinel-seccomp-datasci.json`: broader syscall profile for ML/data workloads
+- `proxy/squid.conf`: sidecar proxy config for proxied profile
+- `proxy/allowed-domains.txt`: proxy domain allowlist
 - `scripts/entrypoint.sh`: ensures `/workspace` and default `sentinel.yaml` exist
 
 ## Prerequisites
@@ -58,16 +61,26 @@ Uses normal container networking with Sentinel policy checks active.
 docker compose --profile standard run --rm sentinel-standard
 ```
 
-### 3) Isolated Arbitrary Command (Recommended for untrusted agents)
+### 3) Proxied Mode (Recommended for networked isolation)
+
+Routes traffic through a sidecar proxy with domain allowlist controls.
+
+```bash
+docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
+```
+
+### 4) Isolated Arbitrary Command (Recommended for untrusted agents)
 
 ```bash
 sentinel-isolate \
   --workspace ./sandbox-workspace \
   --policy ./sentinel.yaml \
-  --proxy http://proxy.internal:8080 \
+  --proxy http://sentinel-proxy:3128 \
+  --enforce-proxy \
   --no-proxy localhost,127.0.0.1 \
+  --seccomp-profile strict \
   --seccomp-mode enforce \
-  --network none \
+  --network bridge \
   -- python your_agent.py
 ```
 
@@ -76,8 +89,12 @@ Seccomp troubleshooting modes:
 - `--seccomp-mode enforce` (default): strict allowlist enforcement.
 - `--seccomp-mode log`: complain/audit mode (`SCMP_ACT_LOG` default action). Use this first for new workloads, then move to `enforce`.
 - `--seccomp-mode off`: disable seccomp (`seccomp=unconfined`) for break-glass troubleshooting only.
+- `--seccomp-profile datasci`: broader syscall baseline for ML/data-science workloads.
+- `--seccomp-profile custom --seccomp /path/profile.json`: explicit custom profile.
 
 You can also set `SENTINEL_SECCOMP_MODE=enforce|log|off`.
+You can also set `SENTINEL_SECCOMP_PROFILE=strict|datasci|custom`.
+Use `SENTINEL_ENFORCE_PROXY=true` (or `--enforce-proxy`) to require proxy for networked runs.
 When debugging blocked syscalls in `log` mode, inspect kernel logs:
 
 ```bash
@@ -126,6 +143,7 @@ Proxy injection into isolated containers:
 ```bash
 export SENTINEL_PROXY=http://proxy.internal:8080
 export SENTINEL_NO_PROXY=localhost,127.0.0.1,.svc.cluster.local
+export SENTINEL_ENFORCE_PROXY=true
 ```
 
 ## Socket Fail-Safe (Default On)

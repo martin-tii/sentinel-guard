@@ -24,6 +24,8 @@ Use this page as the documentation entry point.
 - Safest default (no network):
   - `sentinel-isolate --build-if-missing -- python your_agent.py`
 - Networked isolated run with controlled egress:
-  - `sentinel-isolate --network bridge --proxy http://proxy.internal:8080 --build-if-missing -- python your_agent.py`
+  - `sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py`
+- Managed sidecar proxy profile:
+  - `docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied`
 - Compatibility mode (guardrails only):
   - call `activate_sentinel()` early in your process.

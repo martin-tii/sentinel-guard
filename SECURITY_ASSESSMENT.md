@@ -50,6 +50,8 @@ Last updated: 2026-02-11.
 - Production isolated execution blocks networked mode unless an explicit exception flag is set.
 - Isolation runner now supports `enforce/log/off` seccomp modes for secure-by-default operation with explicit debugging fallback.
 - Isolation runner supports proxy environment injection for egress-control deployments.
+- Isolation runner can enforce proxy requirement on networked runs (`--enforce-proxy` / `SENTINEL_ENFORCE_PROXY`).
+- Compose now includes a managed sidecar proxy profile (`proxied`) to route container egress through controlled proxy infrastructure.
 - Socket fail-safe DNS resolution now includes TTL caching and bounded timeout controls.
 
 ### Remaining Risks and Gaps
@@ -77,6 +79,13 @@ Model adjudication now covers medium/high-risk actions, but low-risk actions sti
 
 Impact:
 - Carefully crafted low-signal malicious actions may evade deeper review.
+
+#### P2: DNS TOCTOU/Rebinding Residual Risk in Compatibility Mode
+Compatibility mode performs hostname resolution checks before outbound socket calls, but underlying system resolution at connect time can still change.
+
+Impact:
+- A determined attacker controlling DNS may exploit time-of-check/time-of-use gaps.
+- This is a known residual risk in in-process Python interception and reinforces isolation-first deployment guidance.
 
 ## Threat Model Notes
 

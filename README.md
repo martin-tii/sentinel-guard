@@ -22,6 +22,12 @@ If you are onboarding a new workload, start with seccomp complain mode, then tig
 sentinel-isolate --seccomp-mode log --build-if-missing -- python your_agent.py
 ```
 
+For networked workloads, prefer enforced proxy egress:
+
+```bash
+sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py
+```
+
 ## Important Security Note
 
 Compatibility mode (`activate_sentinel()` in-process hooks) is guardrails for accidental/buggy behavior, not a hard containment boundary against determined malicious code.
@@ -40,6 +46,7 @@ Blocked actions can default to user-approval prompts when no custom handler is s
 - Deployment hardening: [DEPLOYMENT.md](DEPLOYMENT.md)
 - Security posture: [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md)
 - Moltbot integration: [docs/MOLTBOT_INTEGRATION.md](docs/MOLTBOT_INTEGRATION.md)
+- Integrity/performance benchmark: [scripts/benchmark_integrity.py](scripts/benchmark_integrity.py)
 
 ## Approval UI Preview
 
