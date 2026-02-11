@@ -69,32 +69,80 @@ class PolicyEnforcer:
         audit("FILE_ACCESS", path, "ALLOWED")
         return True
 
-    def check_command(self, command):
-        """The Governor: Validate shell commands using shlex."""
-        try:
-            # Parse the command line safely (handles quotes, etc.)
-            parts = shlex.split(command)
-        except ValueError:
-            # Unbalanced quotes or malformed command
-            audit("EXEC_COMMAND", command, "BLOCKED (Malformed)")
-            raise PermissionError("Malformed command string.")
+    def _shell_tokens(self, command_text):
+        lexer = shlex.shlex(command_text, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
 
-        if not parts:
+    def _command_base_from_shell_tokens(self, tokens):
+        operators = {";", "&&", "||", "|", "&", ">", ">>", "<", "<<", "(", ")"}
+        for token in tokens:
+            if token in operators:
+                continue
+            return token
+        return None
+
+    def check_command(self, command, shell=False):
+        """The Governor: Validate command execution with shell-aware parsing."""
+        if command is None:
+            audit("EXEC_COMMAND", "None", "BLOCKED (Malformed)")
+            raise PermissionError("Command is required.")
+
+        allowed_commands = self.policy.get("allowed_commands", [])
+
+        # shell=False path: prefer structured argv and avoid shell-operator checks.
+        if not shell:
+            if isinstance(command, (list, tuple)):
+                if not command:
+                    return True
+                cmd_base = str(command[0])
+            else:
+                try:
+                    parts = shlex.split(str(command))
+                except ValueError:
+                    audit("EXEC_COMMAND", str(command), "BLOCKED (Malformed)")
+                    raise PermissionError("Malformed command string.")
+                if not parts:
+                    return True
+                cmd_base = parts[0]
+
+            if cmd_base not in allowed_commands:
+                audit("EXEC_COMMAND", str(command), "BLOCKED")
+                raise PermissionError(f"Command '{cmd_base}' is not allowed.")
+
+            audit("EXEC_COMMAND", str(command), "ALLOWED")
             return True
 
-        cmd_base = parts[0]
-        
-        # Check for shell separators if we want to be extra safe
-        risky_chars = [';', '&&', '||', '|']
-        if any(char in command for char in risky_chars):
-             audit("EXEC_COMMAND", command, "BLOCKED (Shell Injection Risk)")
-             raise PermissionError("Complex shell chaining (;, &&, |) is not allowed.")
+        # shell=True path: strict parsing and shell operator blocking.
+        if isinstance(command, (list, tuple)):
+            command_text = " ".join(str(part) for part in command)
+        else:
+            command_text = str(command)
 
-        if cmd_base not in self.policy.get("allowed_commands", []):
-             audit("EXEC_COMMAND", command, "BLOCKED")
-             raise PermissionError(f"Command '{cmd_base}' is not allowed.")
-        
-        audit("EXEC_COMMAND", command, "ALLOWED")
+        try:
+            tokens = self._shell_tokens(command_text)
+        except ValueError:
+            audit("EXEC_COMMAND", command_text, "BLOCKED (Malformed)")
+            raise PermissionError("Malformed command string.")
+
+        if not tokens:
+            return True
+
+        blocked_operators = {";", "&&", "||", "|", "&", ">", ">>", "<", "<<"}
+        if any(token in blocked_operators for token in tokens):
+            audit("EXEC_COMMAND", command_text, "BLOCKED (Shell Injection Risk)")
+            raise PermissionError("Complex shell chaining/redirection is not allowed.")
+
+        cmd_base = self._command_base_from_shell_tokens(tokens)
+        if not cmd_base:
+            audit("EXEC_COMMAND", command_text, "BLOCKED (Malformed)")
+            raise PermissionError("Could not determine executable command.")
+
+        if cmd_base not in allowed_commands:
+            audit("EXEC_COMMAND", command_text, "BLOCKED")
+            raise PermissionError(f"Command '{cmd_base}' is not allowed.")
+
+        audit("EXEC_COMMAND", command_text, "ALLOWED")
         return True
 
     def check_network(self, url):

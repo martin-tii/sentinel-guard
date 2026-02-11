@@ -44,17 +44,18 @@ def _normalize_command(command):
 
 def sentinel_run(*args, **kwargs):
     command = args[0] if args else kwargs.get('args')
-    command = _normalize_command(command)
+    shell = kwargs.get("shell", False)
+    command_str = _normalize_command(command)
     
     # 1. Static Policy Check (The Law)
-    policy.check_command(command)
+    policy.check_command(command, shell=shell)
 
     # 2. AI Judge Check (The Spirit of the Law)
     # We ask LlamaGuard/Heuristics if this specific command looks dangerous
-    verdict = ai_judge.evaluate_action("subprocess.run", command)
+    verdict = ai_judge.evaluate_action("subprocess.run", command_str)
     
     if not verdict["safe"]:
-        audit("AI_JUDGE", f"Flagged action: {command} | Reason: {verdict.get('reason')}", "FLAGGED")
+        audit("AI_JUDGE", f"Flagged action: {command_str} | Reason: {verdict.get('reason')}", "FLAGGED")
         
         # In this MVP, we block automatically if flagged high risk.
         # In a full UI, this would trigger the "Ask Human" popup.
@@ -66,17 +67,18 @@ def sentinel_run(*args, **kwargs):
 
 def sentinel_popen(*args, **kwargs):
     command = args[0] if args else kwargs.get("args")
-    command = _normalize_command(command)
-    policy.check_command(command)
-    verdict = ai_judge.evaluate_action("subprocess.Popen", command)
+    shell = kwargs.get("shell", False)
+    command_str = _normalize_command(command)
+    policy.check_command(command, shell=shell)
+    verdict = ai_judge.evaluate_action("subprocess.Popen", command_str)
     if not verdict["safe"] and verdict.get("needs_human"):
-        audit("AI_JUDGE", f"Flagged action: {command} | Reason: {verdict.get('reason')}", "FLAGGED")
+        audit("AI_JUDGE", f"Flagged action: {command_str} | Reason: {verdict.get('reason')}", "FLAGGED")
         raise PermissionError(f"AI Judge blocked this action: {verdict['reason']}")
     return _original_popen(*args, **kwargs)
 
 def sentinel_system(command):
     normalized = _normalize_command(command)
-    policy.check_command(normalized)
+    policy.check_command(normalized, shell=True)
     verdict = ai_judge.evaluate_action("os.system", normalized)
     if not verdict["safe"] and verdict.get("needs_human"):
         audit("AI_JUDGE", f"Flagged action: {normalized} | Reason: {verdict.get('reason')}", "FLAGGED")

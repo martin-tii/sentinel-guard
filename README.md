@@ -15,6 +15,7 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
 3.  **The Governor (Action Firewall)**
     *   **Action Interception**: Patches `subprocess.run`, `subprocess.Popen`, `os.system`, `requests` session requests, and `builtins.open`.
     *   **Static Whitelisting**: Only allows approved commands and network hosts.
+    *   **Shell-Aware Command Policy**: Applies strict operator blocking for `shell=True` and command-base whitelisting for argv/list execution.
     *   **Phishing Guard (New)**: Heuristic detection of suspicious URLs and brand impersonation.
     *   **Smart Heuristics**: Blocks dangerous patterns like `wget | sh` or destructive shell chaining.
 

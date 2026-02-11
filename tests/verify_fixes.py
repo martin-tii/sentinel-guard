@@ -70,8 +70,24 @@ except Exception as e:
     print("✅ PASSED: Blocked requests.post to disallowed host.")
     print(f"   Reason: {e}")
 
-# TEST 6: policy loading should not depend on current working directory
-print("\n[TEST 6] Testing CWD-independent policy loading...")
+# TEST 6: shell-aware parsing should allow quoted operator characters
+print("\n[TEST 6] Testing quoted shell operators are not misdetected...")
+try:
+    subprocess.run('echo "a|b"', shell=True, check=True, capture_output=True, text=True)
+    print("✅ PASSED: Quoted pipe character allowed.")
+except Exception as e:
+    print(f"❌ FAILED: Quoted pipe was incorrectly blocked: {e}")
+
+# TEST 7: list-form command with shell=False should not treat && as shell chain
+print("\n[TEST 7] Testing argv mode does not over-block symbolic args...")
+try:
+    subprocess.run(["echo", "a&&b"], shell=False, check=True, capture_output=True, text=True)
+    print("✅ PASSED: argv mode allowed symbolic argument.")
+except Exception as e:
+    print(f"❌ FAILED: argv mode incorrectly blocked symbolic arg: {e}")
+
+# TEST 8: policy loading should not depend on current working directory
+print("\n[TEST 8] Testing CWD-independent policy loading...")
 original_cwd = os.getcwd()
 try:
     os.chdir(Path(__file__).resolve().parents[2])
@@ -83,8 +99,8 @@ try:
 finally:
     os.chdir(original_cwd)
 
-# TEST 7: activation idempotency
-print("\n[TEST 7] Testing activate_sentinel idempotency...")
+# TEST 9: activation idempotency
+print("\n[TEST 9] Testing activate_sentinel idempotency...")
 before_open = builtins.open
 before_run = subprocess.run
 before_session_request = requests.sessions.Session.request
@@ -97,8 +113,8 @@ if before_open is after_open and before_run is after_run and before_session_requ
 else:
     print("❌ FAILED: Repeated activation changed patched function references.")
 
-# TEST 8: deactivation restores original runtime behavior
-print("\n[TEST 8] Testing deactivate_sentinel restoration...")
+# TEST 10: deactivation restores original runtime behavior
+print("\n[TEST 10] Testing deactivate_sentinel restoration...")
 deactivate_sentinel()
 restored = (
     builtins.open is core._original_open
