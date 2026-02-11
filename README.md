@@ -408,34 +408,16 @@ All actions are logged to `audit.log` for real-time monitoring and forensics.
 
 ## 🤖 Integration with Moltbot (or any Agent)
 
-There are two ways to protect your agent.
+Use the step-by-step guide:
 
-### Method A: The Wrapper (Recommended)
+- `docs/MOLTBOT_INTEGRATION.md`
 
-Use this method to protect an agent without modifying its source code.
+Quick summary:
 
-1. Install Sentinel:
-   ```bash
-   pip install -e .
-   ```
-
-2. Run your agent via the wrapper:
-   ```bash
-   python examples/moltbot_wrapper.py
-   ```
-
-### Method B: Direct Code Injection
-
-Add these lines to the very top of your agent's entry point (for example, `main.py`):
-
-```python
-from src.core import activate_sentinel
-
-# Must be the first thing that runs!
-activate_sentinel()
-
-# ... rest of your agent code ...
-```
+1. Put your Moltbot script in this folder (or note its path).
+2. Set `MOLTBOT_PATH` in `examples/moltbot_wrapper.py`.
+3. Run `python examples/moltbot_wrapper.py`.
+4. Keep `sentinel.yaml` strict and review `audit.log`.
 
 ## 🚢 Deployment
 
