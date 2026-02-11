@@ -6,6 +6,14 @@ from urllib.parse import urlparse
 from .policy import PolicyEnforcer
 from .utils import audit, is_phishing_url
 from .judge import AIJudge
+from .approval import (
+    SecurityAlert,
+    request_user_approval,
+    set_approval_handler,
+    clear_approval_handler,
+    console_approval_handler,
+    tkinter_approval_handler,
+)
 
 # Initialize Components
 policy = PolicyEnforcer()
@@ -23,71 +31,134 @@ phishing_config = policy.policy.get("phishing", {})
 # 1. File System Interceptor (The Jail)
 _original_open = builtins.open
 
+
+def _enforce_or_escalate(action, target, reason, recommendation):
+    alert = SecurityAlert(
+        action=action,
+        target=str(target),
+        reason=str(reason),
+        recommendation=recommendation,
+    )
+    if request_user_approval(alert):
+        audit("SECURITY_OVERRIDE", f"{action} -> {target}", "APPROVED")
+        return
+    raise PermissionError(str(reason))
+
+
 def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
     # 1. Static Policy Check (The Law)
     try:
         policy.check_file_access(file)
     except PermissionError as e:
-        raise e
-        
+        _enforce_or_escalate(
+            action="file_access",
+            target=file,
+            reason=e,
+            recommendation="Reject unless the file path is expected for this task.",
+        )
+
     return _original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+
 
 # 2. Command Execution Interceptor (The Governor)
 _original_run = subprocess.run
 _original_popen = subprocess.Popen
 _original_os_system = os.system
 
+
 def _normalize_command(command):
     if isinstance(command, list):
         return " ".join(str(part) for part in command)
     return str(command)
 
+
 def sentinel_run(*args, **kwargs):
     command = args[0] if args else kwargs.get('args')
     shell = kwargs.get("shell", False)
     command_str = _normalize_command(command)
-    
+
     # 1. Static Policy Check (The Law)
-    policy.check_command(command, shell=shell)
+    try:
+        policy.check_command(command, shell=shell)
+    except PermissionError as e:
+        _enforce_or_escalate(
+            action="command_execution",
+            target=command_str,
+            reason=e,
+            recommendation="Reject unless this command is required and understood.",
+        )
 
     # 2. AI Judge Check (The Spirit of the Law)
-    # We ask LlamaGuard/Heuristics if this specific command looks dangerous
     verdict = ai_judge.evaluate_action("subprocess.run", command_str)
-    
+
     if not verdict["safe"]:
         audit("AI_JUDGE", f"Flagged action: {command_str} | Reason: {verdict.get('reason')}", "FLAGGED")
-        
-        # In this MVP, we block automatically if flagged high risk.
-        # In a full UI, this would trigger the "Ask Human" popup.
+
         if verdict.get("needs_human"):
-            print(f"\n[⚖️ AI JUDGE ALERT] Blocked: {verdict['reason']}")
-            raise PermissionError(f"AI Judge blocked this action: {verdict['reason']}")
+            _enforce_or_escalate(
+                action="command_execution",
+                target=command_str,
+                reason=f"AI Judge blocked this action: {verdict['reason']}",
+                recommendation="Reject unless you explicitly trust this high-risk command.",
+            )
 
     return _original_run(*args, **kwargs)
+
 
 def sentinel_popen(*args, **kwargs):
     command = args[0] if args else kwargs.get("args")
     shell = kwargs.get("shell", False)
     command_str = _normalize_command(command)
-    policy.check_command(command, shell=shell)
+    try:
+        policy.check_command(command, shell=shell)
+    except PermissionError as e:
+        _enforce_or_escalate(
+            action="command_execution",
+            target=command_str,
+            reason=e,
+            recommendation="Reject unless this command is required and understood.",
+        )
+
     verdict = ai_judge.evaluate_action("subprocess.Popen", command_str)
     if not verdict["safe"] and verdict.get("needs_human"):
         audit("AI_JUDGE", f"Flagged action: {command_str} | Reason: {verdict.get('reason')}", "FLAGGED")
-        raise PermissionError(f"AI Judge blocked this action: {verdict['reason']}")
+        _enforce_or_escalate(
+            action="command_execution",
+            target=command_str,
+            reason=f"AI Judge blocked this action: {verdict['reason']}",
+            recommendation="Reject unless you explicitly trust this high-risk command.",
+        )
     return _original_popen(*args, **kwargs)
+
 
 def sentinel_system(command):
     normalized = _normalize_command(command)
-    policy.check_command(normalized, shell=True)
+    try:
+        policy.check_command(normalized, shell=True)
+    except PermissionError as e:
+        _enforce_or_escalate(
+            action="command_execution",
+            target=normalized,
+            reason=e,
+            recommendation="Reject unless this command is required and understood.",
+        )
+
     verdict = ai_judge.evaluate_action("os.system", normalized)
     if not verdict["safe"] and verdict.get("needs_human"):
         audit("AI_JUDGE", f"Flagged action: {normalized} | Reason: {verdict.get('reason')}", "FLAGGED")
-        raise PermissionError(f"AI Judge blocked this action: {verdict['reason']}")
+        _enforce_or_escalate(
+            action="command_execution",
+            target=normalized,
+            reason=f"AI Judge blocked this action: {verdict['reason']}",
+            recommendation="Reject unless you explicitly trust this high-risk command.",
+        )
     return _original_os_system(command)
+
 
 # 3. Network Interceptor (The Governor + Phishing Guard)
 _original_session_request = requests.sessions.Session.request
 _sentinel_active = False
+
 
 def _is_internal_judge_endpoint(url):
     try:
@@ -97,12 +168,18 @@ def _is_internal_judge_endpoint(url):
     except Exception:
         return False
 
+
 def _enforce_network_policy(url):
     # 1. Phishing Check (Sandbox Event)
     is_phish, reason = is_phishing_url(url, phishing_config)
     if is_phish:
         audit("PHISHING_BLOCK", f"{url} -> {reason}", "BLOCKED")
-        raise PermissionError(f"Phishing Risk Detected: {reason}")
+        _enforce_or_escalate(
+            action="network_access",
+            target=url,
+            reason=f"Phishing Risk Detected: {reason}",
+            recommendation="Reject unless the URL is verified and trusted.",
+        )
 
     # Allow AI Judge's own model endpoint to avoid self-blocking.
     if _is_internal_judge_endpoint(url):
@@ -110,11 +187,21 @@ def _enforce_network_policy(url):
         return
 
     # 2. Static Policy Check (Allow/Block Lists)
-    policy.check_network(url)
+    try:
+        policy.check_network(url)
+    except PermissionError as e:
+        _enforce_or_escalate(
+            action="network_access",
+            target=url,
+            reason=e,
+            recommendation="Reject unless this host is explicitly trusted.",
+        )
+
 
 def sentinel_session_request(self, method, url, **kwargs):
     _enforce_network_policy(url)
     return _original_session_request(self, method, url, **kwargs)
+
 
 # --- Activation ---
 
@@ -126,7 +213,7 @@ def activate_sentinel():
         return
 
     audit("SYSTEM", "Sentinel Activated. Monitoring engaged.", "INFO")
-    
+
     # Monkey Patching
     builtins.open = sentinel_open
     subprocess.run = sentinel_run
@@ -135,7 +222,6 @@ def activate_sentinel():
     requests.sessions.Session.request = sentinel_session_request
     _sentinel_active = True
 
-    # Airlock is passive, used when processing input explicitly
 
 def deactivate_sentinel():
     """Restores original runtime functions and disables Sentinel interception."""
@@ -151,7 +237,8 @@ def deactivate_sentinel():
     requests.sessions.Session.request = _original_session_request
     _sentinel_active = False
     audit("SYSTEM", "Sentinel Deactivated. Original runtime restored.", "INFO")
-    
+
+
 def scan_input(text):
     """
     Public API for the Airlock.
@@ -160,7 +247,21 @@ def scan_input(text):
     # 1. AI Safety Check (LlamaGuard)
     safety = ai_judge.check_input_safety(text)
     if not safety["safe"]:
-         raise ValueError(f"🛡️ LlamaGuard Blocked Input: {safety['reason']}")
+        _enforce_or_escalate(
+            action="input_safety",
+            target="user_input",
+            reason=f"🛡️ LlamaGuard Blocked Input: {safety['reason']}",
+            recommendation="Reject unless you intentionally need to process unsafe input.",
+        )
 
     # 2. Keyword Check (Legacy/Fast)
-    return policy.check_input(text)
+    try:
+        return policy.check_input(text)
+    except ValueError as e:
+        _enforce_or_escalate(
+            action="input_safety",
+            target="user_input",
+            reason=e,
+            recommendation="Reject unless you intentionally need to process restricted content.",
+        )
+        return text

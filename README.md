@@ -80,7 +80,13 @@ phishing:
 ### Integrating with an Agent
 
 ```python
-from src.core import activate_sentinel, deactivate_sentinel
+from src.core import (
+  activate_sentinel,
+  deactivate_sentinel,
+  set_approval_handler,
+  clear_approval_handler,
+  console_approval_handler,
+)
 
 # 🛡️ Activate protections early
 activate_sentinel()
@@ -98,6 +104,41 @@ subprocess.run("rm -rf /", shell=True)
 # Restore original runtime behavior when needed
 deactivate_sentinel()
 ```
+
+### User Approval Workflow (Popup Hook)
+
+When Sentinel blocks an action, you can decide in real time with an approval callback.
+Use this to wire a minimal popup with **Approve** / **Reject** in your host app.
+
+```python
+from src.core import (
+  set_approval_handler,
+  clear_approval_handler,
+  tkinter_approval_handler,
+  console_approval_handler,
+)
+
+def my_popup_handler(alert):
+    # alert.action, alert.target, alert.reason, alert.recommendation
+    # return True to approve override, False to reject
+    return show_security_popup(alert)  # host UI function
+
+set_approval_handler(my_popup_handler)
+# ...
+clear_approval_handler()
+```
+
+Built-in minimal popup:
+
+```python
+set_approval_handler(tkinter_approval_handler)
+```
+
+Example popup:
+
+![Sentinel approval popup](docs/images/approval-popup.png)
+
+For terminal-only usage, use `console_approval_handler`.
 
 ### Running Verification Tests
 

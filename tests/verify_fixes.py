@@ -10,7 +10,12 @@ import builtins
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import src.core as core
-from src.core import activate_sentinel, deactivate_sentinel
+from src.core import (
+    activate_sentinel,
+    deactivate_sentinel,
+    set_approval_handler,
+    clear_approval_handler,
+)
 from src.policy import PolicyEnforcer
 
 activate_sentinel()
@@ -136,6 +141,30 @@ else:
 
 # Reactivate so script finishes in a protected state for consistency.
 activate_sentinel()
+
+# TEST 11: approval workflow for blocked file access
+print("\n[TEST 11] Testing approval workflow for blocked file access...")
+approval_test_path = fake_workspace_dir / "approved_by_user.txt"
+set_approval_handler(lambda alert: alert.action == "file_access")
+try:
+    os.makedirs(os.path.dirname(str(approval_test_path)), exist_ok=True)
+    with open(str(approval_test_path), "w") as f:
+        f.write("approved")
+    print("✅ PASSED: User approval allowed blocked file access.")
+except Exception as e:
+    print(f"❌ FAILED: Approved file access was still blocked: {e}")
+finally:
+    clear_approval_handler()
+
+# Confirm default behavior returns to block after handler is cleared
+print("\n[TEST 12] Testing default rejection when approval handler is cleared...")
+try:
+    with open(str(fake_workspace_dir / "should_block_again.txt"), "w") as f:
+        f.write("blocked")
+    print("❌ FAILED: File access was allowed without approval handler!")
+except Exception as e:
+    print("✅ PASSED: File access blocked again after clearing handler.")
+    print(f"   Reason: {e}")
 
 # Teardown: cleanup test artifact if it exists.
 if fake_workspace_dir.exists() and fake_workspace_dir.is_dir():
