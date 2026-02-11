@@ -8,18 +8,26 @@ allowed_commands:
   - "echo"
   - "ls"
 
+host_match_mode: "exact"  # exact | subdomain
 allowed_hosts:
-  - "openai.com" # Will match api.openai.com due to .endswith logic
+  - host: "api.openai.com"
+    match: "exact"
+    schemes: ["https"]
+    ports: [443]
   - "pypi.org"
 
 blocked_keywords:
   - "ignore previous instructions"
+
+policy_integrity:
+  tamper_detection: true
 
 judge:
   enabled: true
   provider: "ollama"
   model: "llama-guard3"
   endpoint: "http://localhost:11434/api/generate"
+  runtime_judge_threshold: 0.4
   risk_threshold: 0.7
 
 # 🎣 ANTI-PHISHING & SANDBOX EVENTS

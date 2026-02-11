@@ -25,6 +25,23 @@ class IsolationConfig:
     docker_binary: str = "docker"
 
 
+def _is_truthy(value: str) -> bool:
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
+def _enforce_production_network_policy(cfg: IsolationConfig):
+    if not _is_truthy(os.environ.get("SENTINEL_PRODUCTION", "")):
+        return
+    if cfg.network_mode == "none":
+        return
+    if _is_truthy(os.environ.get("SENTINEL_ALLOW_NETWORK_IN_PRODUCTION", "")):
+        return
+    raise IsolationError(
+        "Production mode requires --network none. "
+        "Set SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true to allow a networked exception."
+    )
+
+
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -88,6 +105,7 @@ def build_docker_run_command(command: Sequence[str], cfg: Optional[IsolationConf
 
     if cfg.network_mode not in ("none", "bridge", "host"):
         raise IsolationError("network_mode must be one of: none, bridge, host")
+    _enforce_production_network_policy(cfg)
 
     run_cmd = [
         cfg.docker_binary,

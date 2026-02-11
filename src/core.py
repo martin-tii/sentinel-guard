@@ -28,11 +28,18 @@ judge_config = policy.policy.get("judge", {})
 judge_config.setdefault("endpoint", "http://localhost:11434/api/generate")
 judge_config.setdefault("model", "llama-guard3")
 judge_config.setdefault("risk_threshold", 0.7)
+judge_config.setdefault("runtime_judge_threshold", 0.4)
 judge_config.setdefault("fail_open", False)
 ai_judge = AIJudge(judge_config)
 phishing_config = policy.policy.get("phishing", {})
 network_failsafe_config = policy.policy.get("network_failsafe", {})
 socket_failsafe_enabled = bool(network_failsafe_config.get("socket_connect", False))
+policy_integrity_config = policy.policy.get("policy_integrity", {})
+tamper_detection_enabled = bool(policy_integrity_config.get("tamper_detection", True))
+
+
+def _is_truthy(value):
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
 
 # --- Interceptors ---
 
@@ -61,15 +68,11 @@ def _should_bypass_file_policy(target):
     if isinstance(target, int):
         return True
 
-    try:
-        target_path = pathlib.Path(target).resolve()
-        policy_path = pathlib.Path(policy.policy_path).resolve()
-        return target_path == policy_path
-    except Exception:
-        return False
+    return False
 
 
 def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+    _assert_runtime_integrity()
     # 1. Static Policy Check (The Law)
     if not _should_bypass_file_policy(file):
         try:
@@ -86,6 +89,7 @@ def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newl
 
 
 def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
+    _assert_runtime_integrity()
     if not _should_bypass_file_policy(file):
         try:
             policy.check_file_access(file)
@@ -101,6 +105,7 @@ def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, n
 
 
 def sentinel_path_open(self, mode='r', buffering=-1, encoding=None, errors=None, newline=None):
+    _assert_runtime_integrity()
     if not _should_bypass_file_policy(self):
         try:
             policy.check_file_access(self)
@@ -123,6 +128,7 @@ def _normalize_os_open_path(path):
 
 
 def sentinel_os_open(path, flags, mode=0o777, *, dir_fd=None):
+    _assert_runtime_integrity()
     if dir_fd is not None:
         _enforce_or_escalate(
             action="file_access",
@@ -182,6 +188,7 @@ def _normalize_command(command):
 
 
 def sentinel_run(*args, **kwargs):
+    _assert_runtime_integrity()
     command = args[0] if args else kwargs.get('args')
     shell = kwargs.get("shell", False)
     command_str = _normalize_command(command)
@@ -215,6 +222,7 @@ def sentinel_run(*args, **kwargs):
 
 
 def _enforce_popen_policy(command, shell, tool_name):
+    _assert_runtime_integrity()
     command_str = _normalize_command(command)
     try:
         policy.check_command(command, shell=shell)
@@ -252,6 +260,7 @@ def sentinel_popen_init(self, *args, **kwargs):
 
 
 def sentinel_system(command):
+    _assert_runtime_integrity()
     normalized = _normalize_command(command)
     try:
         policy.check_command(normalized, shell=True)
@@ -286,6 +295,7 @@ def _normalize_argv_command(argv_or_command, fallback=None):
 
 
 def _enforce_exec_policy(action_name, argv_or_command, *, fallback=None):
+    _assert_runtime_integrity()
     argv = _normalize_argv_command(argv_or_command, fallback=fallback)
     command_str = " ".join(argv) if argv else str(fallback or "")
     try:
@@ -434,6 +444,123 @@ _original_socket_connect_ex = socket.socket.connect_ex
 _original_socket_sendto = socket.socket.sendto
 _sentinel_active = False
 _socket_patch_active = False
+_integrity_check_in_progress = False
+_expected_runtime_bindings = {}
+
+
+def _is_production_mode():
+    return _is_truthy(os.environ.get("SENTINEL_PRODUCTION", ""))
+
+
+def _runtime_binding_getters():
+    getters = {
+        "builtins.open": lambda: builtins.open,
+        "io.open": lambda: io.open,
+        "pathlib.Path.open": lambda: pathlib.Path.open,
+        "os.open": lambda: os.open,
+        "subprocess.run": lambda: subprocess.run,
+        "subprocess.Popen": lambda: subprocess.Popen,
+        "subprocess.Popen.__init__": lambda: _original_popen.__init__,
+        "os.system": lambda: os.system,
+        "requests.sessions.Session.request": lambda: requests.sessions.Session.request,
+        "urllib.request.urlopen": lambda: urllib_request.urlopen,
+        "http.client.HTTPConnection.request": lambda: http_client.HTTPConnection.request,
+        "http.client.HTTPSConnection.request": lambda: http_client.HTTPSConnection.request,
+        "core.request_user_approval": lambda: request_user_approval,
+        "core.policy": lambda: policy,
+        "core.ai_judge": lambda: ai_judge,
+        "core._enforce_or_escalate": lambda: _enforce_or_escalate,
+    }
+
+    if _original_posix_spawn is not None:
+        getters["os.posix_spawn"] = lambda: os.posix_spawn
+    if _original_posix_spawnp is not None:
+        getters["os.posix_spawnp"] = lambda: os.posix_spawnp
+
+    for name, fn in _ORIGINAL_EXEC_FNS.items():
+        if fn is not None:
+            getters[f"os.{name}"] = lambda n=name: getattr(os, n)
+    for name, fn in _ORIGINAL_SPAWN_FNS.items():
+        if fn is not None:
+            getters[f"os.{name}"] = lambda n=name: getattr(os, n)
+
+    if _socket_patch_active:
+        getters["socket.socket.connect"] = lambda: socket.socket.connect
+        getters["socket.socket.connect_ex"] = lambda: socket.socket.connect_ex
+        getters["socket.socket.sendto"] = lambda: socket.socket.sendto
+    return getters
+
+
+def _record_expected_runtime_bindings():
+    global _expected_runtime_bindings
+    getters = _runtime_binding_getters()
+    _expected_runtime_bindings = {name: getter() for name, getter in getters.items()}
+
+
+def _assert_runtime_integrity():
+    global _integrity_check_in_progress
+    if not _sentinel_active or not tamper_detection_enabled:
+        return
+    if _integrity_check_in_progress:
+        return
+
+    _integrity_check_in_progress = True
+    try:
+        try:
+            policy.verify_policy_immutability()
+        except Exception as e:
+            audit("TAMPER_DETECT", f"Policy integrity violation: {e}", "CRITICAL")
+            raise PermissionError(f"Policy integrity violation: {e}")
+
+        if not _expected_runtime_bindings:
+            return
+
+        getters = _runtime_binding_getters()
+        mismatches = []
+        for name, expected in _expected_runtime_bindings.items():
+            getter = getters.get(name)
+            if getter is None:
+                mismatches.append(f"{name} (missing)")
+                continue
+            current = getter()
+            if current is not expected:
+                mismatches.append(name)
+
+        if mismatches:
+            summary = ", ".join(mismatches)
+            audit("TAMPER_DETECT", f"Runtime hook drift detected: {summary}", "CRITICAL")
+            raise PermissionError(f"Sentinel runtime integrity violation: {summary}")
+    finally:
+        _integrity_check_in_progress = False
+
+
+def _assert_production_integrity_requirements():
+    if not _is_production_mode():
+        return
+    attestation = policy.attestation()
+    if attestation.get("signature_mode") == "none":
+        raise RuntimeError(
+            "Production mode requires signed policy verification "
+            "(SENTINEL_POLICY_SHA256 or SENTINEL_POLICY_HMAC_SHA256)."
+        )
+    if not attestation.get("immutable_policy"):
+        raise RuntimeError("Production mode requires SENTINEL_POLICY_IMMUTABLE=true.")
+
+
+def _emit_startup_attestation():
+    details = policy.attestation()
+    audit(
+        "ATTESTATION",
+        (
+            f"production={details.get('production_mode')} "
+            f"tamper_detection={tamper_detection_enabled} "
+            f"policy_source={details.get('policy_source')} "
+            f"signature_mode={details.get('signature_mode')} "
+            f"immutable={details.get('immutable_policy')} "
+            f"policy_sha256={details.get('policy_sha256')}"
+        ),
+        "INFO",
+    )
 
 
 def _is_internal_judge_endpoint(url):
@@ -491,6 +618,7 @@ def _is_internal_judge_socket_target(host, port):
 
 
 def _enforce_network_policy(url):
+    _assert_runtime_integrity()
     # 1. Phishing Check (Sandbox Event)
     is_phish, reason = is_phishing_url(url, phishing_config)
     if is_phish:
@@ -571,6 +699,7 @@ def sentinel_https_request(self, method, url, body=None, headers=None, *, encode
 
 
 def sentinel_socket_connect(self, address):
+    _assert_runtime_integrity()
     if isinstance(address, tuple) and len(address) >= 2:
         host = address[0]
         port = address[1]
@@ -595,6 +724,7 @@ def sentinel_socket_connect(self, address):
 
 
 def sentinel_socket_connect_ex(self, address):
+    _assert_runtime_integrity()
     if isinstance(address, tuple) and len(address) >= 2:
         host = address[0]
         port = address[1]
@@ -631,6 +761,7 @@ def _extract_sendto_address(args):
 
 
 def sentinel_socket_sendto(self, data, *args):
+    _assert_runtime_integrity()
     address = _extract_sendto_address(args)
     if isinstance(address, tuple) and len(address) >= 2:
         host = address[0]
@@ -659,14 +790,28 @@ def activate_sentinel():
     global _sentinel_active, _socket_patch_active
 
     # Emergency kill switch for production incidents.
-    if os.environ.get("SENTINEL_DISABLE", "").lower() in ("true", "1", "yes"):
-        audit("SYSTEM", "Sentinel disabled via SENTINEL_DISABLE env var.", "WARNING")
+    disable_requested = _is_truthy(os.environ.get("SENTINEL_DISABLE", ""))
+    if disable_requested:
+        disable_allowed = _is_truthy(os.environ.get("SENTINEL_ALLOW_DISABLE", ""))
+        if not disable_allowed:
+            audit(
+                "SYSTEM",
+                "Disable requested but blocked: set SENTINEL_ALLOW_DISABLE=true to permit disable.",
+                "CRITICAL",
+            )
+            raise RuntimeError(
+                "SENTINEL_DISABLE requested but not permitted. "
+                "Set SENTINEL_ALLOW_DISABLE=true to allow disabling Sentinel."
+            )
+
+        audit("SYSTEM", "Sentinel disabled via explicit dual-control environment flags.", "WARNING")
         return
 
     if _sentinel_active:
         audit("SYSTEM", "Sentinel already active. Skipping re-patch.", "INFO")
         return
 
+    _assert_production_integrity_requirements()
     audit("SYSTEM", "Sentinel Activated. Monitoring engaged.", "INFO")
 
     # Monkey Patching
@@ -724,11 +869,14 @@ def activate_sentinel():
         socket.socket.sendto = sentinel_socket_sendto
         _socket_patch_active = True
     _sentinel_active = True
+    _record_expected_runtime_bindings()
+    _assert_runtime_integrity()
+    _emit_startup_attestation()
 
 
 def deactivate_sentinel():
     """Restores original runtime functions and disables Sentinel interception."""
-    global _sentinel_active, _socket_patch_active
+    global _sentinel_active, _socket_patch_active, _expected_runtime_bindings
     if not _sentinel_active:
         audit("SYSTEM", "Sentinel already inactive. Nothing to restore.", "INFO")
         return
@@ -786,6 +934,7 @@ def deactivate_sentinel():
         socket.socket.connect_ex = _original_socket_connect_ex
         socket.socket.sendto = _original_socket_sendto
         _socket_patch_active = False
+    _expected_runtime_bindings = {}
     _sentinel_active = False
     audit("SYSTEM", "Sentinel Deactivated. Original runtime restored.", "INFO")
 
@@ -795,6 +944,7 @@ def scan_input(text):
     Public API for the Airlock.
     Now checks LlamaGuard FIRST, then keywords.
     """
+    _assert_runtime_integrity()
     # 1. AI Safety Check (LlamaGuard)
     safety = ai_judge.check_input_safety(text)
     if not safety["safe"]:

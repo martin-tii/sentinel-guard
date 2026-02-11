@@ -36,22 +36,24 @@ One-command demo:
 ./run_demo.sh
 ```
 
+`run_demo.sh` uses strict mode (`network_mode: none`) by default.
+
 Build:
 
 ```bash
 docker compose build
 ```
 
-Run standard sandbox mode:
-
-```bash
-docker compose --profile standard run --rm sentinel-standard
-```
-
-Run strict sandbox mode (no container networking):
+Run strict sandbox mode (recommended default):
 
 ```bash
 docker compose --profile strict run --rm sentinel-strict
+```
+
+Run standard sandbox mode (only when networking is required):
+
+```bash
+docker compose --profile standard run --rm sentinel-standard
 ```
 
 Run an arbitrary agent command in isolated mode (recommended):
@@ -97,8 +99,16 @@ allowed_paths:
 allowed_commands:
   - "echo"
   - "ls"
+host_match_mode: "exact"   # exact | subdomain
 allowed_hosts:
-  - "api.openai.com"
+  - host: "api.openai.com"
+    match: "exact"
+    schemes: ["https"]
+    ports: [443]
+  - "pypi.org"  # inherits host_match_mode and allows default ports
+
+policy_integrity:
+  tamper_detection: true
 
 # 🧠 AI JUDGE CONFIG
 judge:
@@ -106,8 +116,9 @@ judge:
   provider: "ollama"
   model: "llama-guard3"
   endpoint: "http://localhost:11434/api/generate"
+  runtime_judge_threshold: 0.4  # model adjudication starts at this heuristic risk
   risk_threshold: 0.7
-  fail_open: false  # default is fail-closed when judge is unavailable
+  fail_open: false  # high-risk runtime actions fail-closed when judge is unavailable
 
 # 🎣 ANTI-PHISHING
 phishing:
@@ -138,7 +149,15 @@ Emergency kill switch:
 export SENTINEL_DISABLE=true
 ```
 
-When set to `true` / `1` / `yes`, Sentinel will not activate.
+Disable now requires explicit dual control:
+
+```bash
+export SENTINEL_DISABLE=true
+export SENTINEL_ALLOW_DISABLE=true
+```
+
+If `SENTINEL_DISABLE` is set without `SENTINEL_ALLOW_DISABLE=true`,
+Sentinel raises a runtime error and stays enforced.
 
 Inject policy from environment (useful in Docker/Kubernetes):
 
@@ -148,6 +167,37 @@ export SENTINEL_POLICY_CONTENT="$(cat sentinel.yaml)"
 
 When `SENTINEL_POLICY_CONTENT` is present, Sentinel loads policy from that value first,
 then falls back to file-based `sentinel.yaml` if env YAML is invalid.
+
+High-assurance policy integrity controls:
+
+```bash
+# Verify exact policy hash at startup.
+export SENTINEL_POLICY_SHA256="<sha256-of-policy-content>"
+
+# Optional HMAC-based signature verification.
+export SENTINEL_POLICY_HMAC_KEY="<shared-secret>"
+export SENTINEL_POLICY_HMAC_SHA256="<hmac-sha256-of-policy-content>"
+
+# Detect policy drift at runtime (fail-closed when changed).
+export SENTINEL_POLICY_IMMUTABLE=true
+```
+
+Production hard-fail mode:
+
+```bash
+export SENTINEL_PRODUCTION=true
+```
+
+When production mode is enabled, Sentinel requires:
+- signed policy verification (`SENTINEL_POLICY_SHA256` or `SENTINEL_POLICY_HMAC_SHA256`)
+- immutable policy checks (`SENTINEL_POLICY_IMMUTABLE=true`)
+
+For isolated execution in production, networking is blocked by default.
+To explicitly allow a networked exception:
+
+```bash
+export SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true
+```
 
 ## 🕹️ Usage
 

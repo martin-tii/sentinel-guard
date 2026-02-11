@@ -11,6 +11,17 @@ For hard isolation of untrusted agents, prefer the dedicated runner:
 sentinel-isolate --build-if-missing -- python your_agent.py
 ```
 
+Production baseline:
+
+```bash
+export SENTINEL_PRODUCTION=true
+export SENTINEL_POLICY_IMMUTABLE=true
+export SENTINEL_POLICY_SHA256="<sha256-of-policy-content>"
+```
+
+In production mode, `sentinel-isolate` enforces `--network none` unless
+`SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true` is explicitly set.
+
 ## Files
 
 - `Dockerfile`: builds the Sentinel runtime image
@@ -31,15 +42,7 @@ docker compose build
 
 ## Run Modes
 
-### 1) Standard Mode
-
-Uses normal container networking with Sentinel policy checks active.
-
-```bash
-docker compose --profile standard run --rm sentinel-standard
-```
-
-### 2) Strict Mode
+### 1) Strict Mode (Recommended Default)
 
 Disables all container networking (`network_mode: none`) as an OS-level fail-safe.
 
@@ -47,7 +50,15 @@ Disables all container networking (`network_mode: none`) as an OS-level fail-saf
 docker compose --profile strict run --rm sentinel-strict
 ```
 
-### 3) Isolated Arbitrary Command (Recommended)
+### 2) Standard Mode (Only if networking is required)
+
+Uses normal container networking with Sentinel policy checks active.
+
+```bash
+docker compose --profile standard run --rm sentinel-standard
+```
+
+### 3) Isolated Arbitrary Command (Recommended for untrusted agents)
 
 ```bash
 sentinel-isolate \
@@ -71,7 +82,7 @@ Host directory `./sandbox-workspace` is mounted to `/workspace` in the container
 - `read_only: true`
 - `cap_drop: [ALL]`
 - `security_opt: no-new-privileges:true`
-- custom seccomp deny list (`seccomp/sentinel-seccomp.json`)
+- custom seccomp allowlist profile (`seccomp/sentinel-seccomp.json`)
 - `tmpfs` for `/tmp` and `/run`
 - process/memory/CPU limits
 

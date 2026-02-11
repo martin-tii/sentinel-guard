@@ -4,7 +4,7 @@ set -euo pipefail
 # A simple wrapper to launch the secure sandbox
 
 echo "[Sentinel] Starting sandbox..."
-echo "  - Mode: Standard (Network Allowed)"
+echo "  - Mode: Strict (Network Disabled)"
 echo "  - RootFS: Read-Only"
 echo "  - User: sentinel (Non-Root)"
 
@@ -18,4 +18,4 @@ mkdir -p ./sandbox-workspace
 
 # Build image if needed, then run demo.
 docker compose build
-exec docker compose --profile standard run --rm sentinel-standard
+exec docker compose --profile strict run --rm sentinel-strict
