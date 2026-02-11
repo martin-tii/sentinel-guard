@@ -20,7 +20,34 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
     *   **Phishing Guard (New)**: Heuristic detection of suspicious URLs and brand impersonation.
     *   **Smart Heuristics**: Blocks dangerous patterns like `wget | sh` or destructive shell chaining.
 
-## 🚀 Getting Started
+## 🚀 Getting Started (Docker Sandbox)
+
+### Prerequisites
+
+- Docker Engine
+- Docker Compose v2 (`docker compose`)
+
+### Quickstart
+
+Build:
+
+```bash
+docker compose build
+```
+
+Run standard sandbox mode:
+
+```bash
+docker compose --profile standard run --rm sentinel-standard
+```
+
+Run strict sandbox mode (no container networking):
+
+```bash
+docker compose --profile strict run --rm sentinel-strict
+```
+
+## 🧪 Local Development Setup
 
 ### Prerequisites
 
@@ -152,9 +179,39 @@ set_approval_handler(tkinter_approval_handler)
 
 Example popup:
 
-![Sentinel approval popup](docs/images/approval-popup.png)
+<img src="docs/images/approval-popup.png" alt="Sentinel approval popup" width="860" />
 
 For terminal-only usage, use `console_approval_handler`.
+
+### Interaction Examples
+
+Example 1: blocked command (default reject)
+
+```text
+[BLOCKED (Shell Injection Risk)] EXEC_COMMAND: ls && echo 'Hacked'
+[REJECTED] SECURITY_ALERT: command_execution -> ls && echo 'Hacked'
+Reason: Complex shell chaining/redirection/substitution is not allowed.
+```
+
+Example 2: approval popup reject
+
+```text
+Action: file_access
+Target: /tmp/sentinel-approval-test.txt
+Recommendation: Reject unless the file path is expected for this task.
+User Decision: Reject
+Result: PermissionError
+```
+
+Example 3: approval popup approve
+
+```text
+Action: file_access
+Target: /tmp/sentinel-approval-test.txt
+User Decision: Approve
+[APPROVED] SECURITY_OVERRIDE: file_access -> /tmp/sentinel-approval-test.txt
+Result: write completed
+```
 
 ### Running Verification Tests
 
@@ -183,3 +240,7 @@ python examples/smart_test.py
 ## 📝 Audit Logging
 
 All actions are logged to `audit.log` for real-time monitoring and forensics.
+
+## 🚢 Deployment
+
+Containerized sandbox deployment assets and hardening details are documented in `DEPLOYMENT.md`.

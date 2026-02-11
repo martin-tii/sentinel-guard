@@ -1,0 +1,33 @@
+name: sentinel-sandbox
+
+x-sentinel-common: &sentinel-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: sentinel-guard:local
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+    - seccomp:./seccomp/sentinel-seccomp.json
+  pids_limit: 256
+  mem_limit: 512m
+  cpus: 1.0
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+    - /run:rw,noexec,nosuid,size=16m
+  volumes:
+    - ./sandbox-workspace:/workspace:rw
+
+services:
+  sentinel-standard:
+    <<: *sentinel-common
+    profiles: ["standard"]
+    command: ["python", "/opt/sentinel/tests/verify_fixes.py"]
+
+  sentinel-strict:
+    <<: *sentinel-common
+    profiles: ["strict"]
+    network_mode: "none"
+    command: ["python", "/opt/sentinel/tests/verify_fixes.py"]

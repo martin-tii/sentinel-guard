@@ -1,0 +1,39 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_X86",
+    "SCMP_ARCH_X32",
+    "SCMP_ARCH_AARCH64",
+    "SCMP_ARCH_ARM"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "ptrace",
+        "kexec_load",
+        "open_by_handle_at",
+        "init_module",
+        "finit_module",
+        "delete_module",
+        "bpf",
+        "userfaultfd",
+        "mount",
+        "umount2",
+        "pivot_root",
+        "move_mount",
+        "fsopen",
+        "fsconfig",
+        "fsmount",
+        "fspick",
+        "swapon",
+        "swapoff",
+        "reboot",
+        "setns",
+        "unshare",
+        "clone3"
+      ],
+      "action": "SCMP_ACT_ERRNO"
+    }
+  ]
+}
