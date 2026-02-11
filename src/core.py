@@ -1,6 +1,8 @@
 import builtins
+import os
 import subprocess
 import requests # Assuming requests is used, we'll patch it
+from urllib.parse import urlparse
 from .policy import PolicyEnforcer
 from .utils import audit, is_phishing_url
 from .judge import AIJudge
@@ -8,13 +10,13 @@ from .judge import AIJudge
 # Initialize Components
 policy = PolicyEnforcer()
 
-# In a real app, config would come from sentinel.yaml
-judge_config = {
-    "endpoint": "http://localhost:11434/api/generate",
-    "model": "llama-guard3",
-    "risk_threshold": 0.7
-}
+judge_config = policy.policy.get("judge", {})
+judge_config.setdefault("endpoint", "http://localhost:11434/api/generate")
+judge_config.setdefault("model", "llama-guard3")
+judge_config.setdefault("risk_threshold", 0.7)
+judge_config.setdefault("fail_open", False)
 ai_judge = AIJudge(judge_config)
+phishing_config = policy.policy.get("phishing", {})
 
 # --- Interceptors ---
 
@@ -31,18 +33,21 @@ def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newl
     return _original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
 
 # 2. Command Execution Interceptor (The Governor)
-_original_system = subprocess.run
+_original_run = subprocess.run
+_original_popen = subprocess.Popen
+_original_os_system = os.system
+
+def _normalize_command(command):
+    if isinstance(command, list):
+        return " ".join(str(part) for part in command)
+    return str(command)
 
 def sentinel_run(*args, **kwargs):
     command = args[0] if args else kwargs.get('args')
-    if isinstance(command, list):
-        command = " ".join(command)
+    command = _normalize_command(command)
     
     # 1. Static Policy Check (The Law)
-    try:
-        policy.check_command(command)
-    except PermissionError as e:
-        raise e
+    policy.check_command(command)
 
     # 2. AI Judge Check (The Spirit of the Law)
     # We ask LlamaGuard/Heuristics if this specific command looks dangerous
@@ -57,28 +62,56 @@ def sentinel_run(*args, **kwargs):
             print(f"\n[⚖️ AI JUDGE ALERT] Blocked: {verdict['reason']}")
             raise PermissionError(f"AI Judge blocked this action: {verdict['reason']}")
 
-    return _original_system(*args, **kwargs)
+    return _original_run(*args, **kwargs)
+
+def sentinel_popen(*args, **kwargs):
+    command = args[0] if args else kwargs.get("args")
+    command = _normalize_command(command)
+    policy.check_command(command)
+    verdict = ai_judge.evaluate_action("subprocess.Popen", command)
+    if not verdict["safe"] and verdict.get("needs_human"):
+        audit("AI_JUDGE", f"Flagged action: {command} | Reason: {verdict.get('reason')}", "FLAGGED")
+        raise PermissionError(f"AI Judge blocked this action: {verdict['reason']}")
+    return _original_popen(*args, **kwargs)
+
+def sentinel_system(command):
+    normalized = _normalize_command(command)
+    policy.check_command(normalized)
+    verdict = ai_judge.evaluate_action("os.system", normalized)
+    if not verdict["safe"] and verdict.get("needs_human"):
+        audit("AI_JUDGE", f"Flagged action: {normalized} | Reason: {verdict.get('reason')}", "FLAGGED")
+        raise PermissionError(f"AI Judge blocked this action: {verdict['reason']}")
+    return _original_os_system(command)
 
 # 3. Network Interceptor (The Governor + Phishing Guard)
-_original_get = requests.get
+_original_session_request = requests.sessions.Session.request
 
-def sentinel_get(url, params=None, **kwargs):
+def _is_internal_judge_endpoint(url):
+    try:
+        judge_host = urlparse(ai_judge.endpoint).hostname
+        target_host = urlparse(url).hostname
+        return bool(judge_host and target_host and judge_host == target_host)
+    except Exception:
+        return False
+
+def _enforce_network_policy(url):
     # 1. Phishing Check (Sandbox Event)
-    is_phish, reason = is_phishing_url(url)
+    is_phish, reason = is_phishing_url(url, phishing_config)
     if is_phish:
         audit("PHISHING_BLOCK", f"{url} -> {reason}", "BLOCKED")
         raise PermissionError(f"Phishing Risk Detected: {reason}")
 
-    # 2. Static Policy Check (Allow/Block Lists)
-    try:
-        policy.check_network(url)
-    except PermissionError as e:
-        raise e
-        
-    # (Optional) We could also add AI Judge here for semantic URL analysis
-    
-    return _original_get(url, params=params, **kwargs)
+    # Allow AI Judge's own model endpoint to avoid self-blocking.
+    if _is_internal_judge_endpoint(url):
+        audit("NETWORK_ACCESS", f"{url} (AI Judge endpoint)", "ALLOWED")
+        return
 
+    # 2. Static Policy Check (Allow/Block Lists)
+    policy.check_network(url)
+
+def sentinel_session_request(self, method, url, **kwargs):
+    _enforce_network_policy(url)
+    return _original_session_request(self, method, url, **kwargs)
 
 # --- Activation ---
 
@@ -89,7 +122,9 @@ def activate_sentinel():
     # Monkey Patching
     builtins.open = sentinel_open
     subprocess.run = sentinel_run
-    requests.get = sentinel_get
+    subprocess.Popen = sentinel_popen
+    os.system = sentinel_system
+    requests.sessions.Session.request = sentinel_session_request
 
     # Airlock is passive, used when processing input explicitly
     

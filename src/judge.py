@@ -8,6 +8,7 @@ class AIJudge:
         self.config = config or {}
         self.endpoint = self.config.get("endpoint", "http://localhost:11434/api/generate")
         self.model = self.config.get("model", "llama-guard3")
+        self.fail_open = self.config.get("fail_open", False)
 
     def call_ollama(self, prompt):
         """Raw call to Ollama API."""
@@ -18,10 +19,12 @@ class AIJudge:
                 "stream": False
             }
             response = requests.post(self.endpoint, json=payload, timeout=5)
-            return response.json().get("response", "").strip()
+            return {"ok": True, "response": response.json().get("response", "").strip()}
         except Exception as e:
             audit("JUDGE_ERROR", f"Ollama unreachable: {e}", "WARNING")
-            return "safe" # Fail open or closed? Let's fail open for MVP, but log warning.
+            if self.fail_open:
+                return {"ok": True, "response": "safe"}
+            return {"ok": False, "response": "", "reason": "AI Judge unavailable"}
 
     def check_input_safety(self, text):
         """
@@ -29,7 +32,12 @@ class AIJudge:
         """
         # LlamaGuard 3 expects the raw input; it has internal templates.
         # We wrap it simply to define the task if needed, but raw usually works for basic checks.
-        response = self.call_ollama(text)
+        judge_result = self.call_ollama(text)
+        if not judge_result.get("ok"):
+            reason = judge_result.get("reason", "AI Judge unavailable")
+            audit("AI_JUDGE", f"Input blocked: {reason}", "BLOCKED")
+            return {"safe": False, "reason": reason}
+        response = judge_result.get("response", "")
         
         # LlamaGuard output format is usually "safe" or "unsafe \n S{code}"
         if "unsafe" in response.lower():

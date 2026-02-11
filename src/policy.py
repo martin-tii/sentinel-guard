@@ -1,21 +1,38 @@
 import yaml
 import os
 import shlex
+import io
 from urllib.parse import urlparse
 from pathlib import Path
 from .utils import audit
 
 class PolicyEnforcer:
     def __init__(self, policy_path="sentinel.yaml"):
-        self.policy = self._load_policy(policy_path)
+        self.policy_path = self._resolve_policy_path(policy_path)
+        self.policy = self._load_policy(self.policy_path)
+
+    def _resolve_policy_path(self, path):
+        candidate = Path(path)
+        if candidate.is_absolute():
+            return candidate
+
+        cwd_candidate = Path.cwd() / candidate
+        if cwd_candidate.exists():
+            return cwd_candidate
+
+        # Fallback to repository root (../sentinel.yaml from src/policy.py)
+        return Path(__file__).resolve().parents[1] / candidate
 
     def _load_policy(self, path):
         try:
-            # Note: We use the raw open here to avoid recursion with the interceptor
-            with open(path, "r") as f:
+            # Use io.open so policy loading is not blocked by monkey-patched builtins.open
+            with io.open(path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except FileNotFoundError:
             audit("LOAD_POLICY", f"Policy file not found: {path}", "ERROR")
+            return {}
+        except yaml.YAMLError as e:
+            audit("LOAD_POLICY", f"Invalid policy file at {path}: {e}", "ERROR")
             return {}
 
     def check_file_access(self, path):

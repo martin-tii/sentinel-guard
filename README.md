@@ -13,7 +13,7 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
     *   Restricts file system access to a specific `./workspace`.
     *   Blocks access to sensitive files like `.env`, `.ssh`, and system directories.
 3.  **The Governor (Action Firewall)**
-    *   **Action Interception**: Patches `subprocess`, `requests`, and `builtins.open`.
+    *   **Action Interception**: Patches `subprocess.run`, `subprocess.Popen`, `os.system`, `requests` session requests, and `builtins.open`.
     *   **Static Whitelisting**: Only allows approved commands and network hosts.
     *   **Phishing Guard (New)**: Heuristic detection of suspicious URLs and brand impersonation.
     *   **Smart Heuristics**: Blocks dangerous patterns like `wget | sh` or destructive shell chaining.
@@ -62,8 +62,11 @@ allowed_hosts:
 # 🧠 AI JUDGE CONFIG
 judge:
   enabled: true
+  provider: "ollama"
   model: "llama-guard3"
+  endpoint: "http://localhost:11434/api/generate"
   risk_threshold: 0.7
+  fail_open: false  # default is fail-closed when judge is unavailable
 
 # 🎣 ANTI-PHISHING
 phishing:
@@ -105,7 +108,9 @@ python examples/smart_test.py
 > [!NOTE]  
 > On some systems, `python3` may point to a different global installation. Ensure you use `python` while the `sentinel-guard` conda environment is active.
 
+> [!NOTE]
+> Sentinel now loads `sentinel.yaml` independent of your current working directory. You can run tests from either the project root or inside `sentinel-guard`.
+
 ## 📝 Audit Logging
 
 All actions are logged to `audit.log` for real-time monitoring and forensics.
-
