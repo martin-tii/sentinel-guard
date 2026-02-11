@@ -79,9 +79,11 @@ phishing:
 ### Integrating with an Agent
 
 ```python
-from src.core import activate_sentinel
+from src.core import activate_sentinel, deactivate_sentinel
 
 # 🛡️ Activate protections early
+activate_sentinel()
+# Safe to call more than once (idempotent)
 activate_sentinel()
 
 # Blocked by Phishing Guard
@@ -91,6 +93,9 @@ requests.get("http://google.com.verify.xyz")
 # Blocked by AI Judge Heuristics
 import subprocess
 subprocess.run("rm -rf /", shell=True)
+
+# Restore original runtime behavior when needed
+deactivate_sentinel()
 ```
 
 ### Running Verification Tests
@@ -110,6 +115,9 @@ python examples/smart_test.py
 
 > [!NOTE]
 > Sentinel now loads `sentinel.yaml` independent of your current working directory. You can run tests from either the project root or inside `sentinel-guard`.
+
+> [!NOTE]
+> Activation is idempotent. Repeated `activate_sentinel()` calls do not stack patches, and `deactivate_sentinel()` restores original functions.
 
 ## 📝 Audit Logging
 

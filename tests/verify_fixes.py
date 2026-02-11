@@ -4,11 +4,13 @@ import subprocess
 import shutil
 import requests
 from pathlib import Path
+import builtins
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.core import activate_sentinel
+import src.core as core
+from src.core import activate_sentinel, deactivate_sentinel
 from src.policy import PolicyEnforcer
 
 activate_sentinel()
@@ -80,6 +82,44 @@ try:
         print("❌ FAILED: Policy loaded empty outside sentinel-guard CWD.")
 finally:
     os.chdir(original_cwd)
+
+# TEST 7: activation idempotency
+print("\n[TEST 7] Testing activate_sentinel idempotency...")
+before_open = builtins.open
+before_run = subprocess.run
+before_session_request = requests.sessions.Session.request
+activate_sentinel()
+after_open = builtins.open
+after_run = subprocess.run
+after_session_request = requests.sessions.Session.request
+if before_open is after_open and before_run is after_run and before_session_request is after_session_request:
+    print("✅ PASSED: Repeated activation does not stack/replace patches.")
+else:
+    print("❌ FAILED: Repeated activation changed patched function references.")
+
+# TEST 8: deactivation restores original runtime behavior
+print("\n[TEST 8] Testing deactivate_sentinel restoration...")
+deactivate_sentinel()
+restored = (
+    builtins.open is core._original_open
+    and subprocess.run is core._original_run
+    and subprocess.Popen is core._original_popen
+    and os.system is core._original_os_system
+    and requests.sessions.Session.request is core._original_session_request
+)
+if not restored:
+    print("❌ FAILED: Deactivation did not restore all original functions.")
+else:
+    print("✅ PASSED: Deactivation restored original runtime functions.")
+    try:
+        # 'pwd' is not whitelisted while sentinel is active; this should run when deactivated.
+        subprocess.run("pwd", shell=True, check=True, capture_output=True, text=True)
+        print("✅ PASSED: Command execution no longer intercepted after deactivation.")
+    except Exception as e:
+        print(f"❌ FAILED: Command still appears intercepted after deactivation: {e}")
+
+# Reactivate so script finishes in a protected state for consistency.
+activate_sentinel()
 
 # Teardown: cleanup test artifact if it exists.
 if fake_workspace_dir.exists() and fake_workspace_dir.is_dir():

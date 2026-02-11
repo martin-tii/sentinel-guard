@@ -7,6 +7,11 @@ def setup_logging():
     """Configures logging for Project Sentinel."""
     logger = logging.getLogger("Sentinel")
     logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    # Avoid duplicate handlers when modules are imported multiple times.
+    if logger.handlers:
+        return logger
 
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 

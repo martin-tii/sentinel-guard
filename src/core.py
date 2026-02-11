@@ -85,6 +85,7 @@ def sentinel_system(command):
 
 # 3. Network Interceptor (The Governor + Phishing Guard)
 _original_session_request = requests.sessions.Session.request
+_sentinel_active = False
 
 def _is_internal_judge_endpoint(url):
     try:
@@ -117,6 +118,11 @@ def sentinel_session_request(self, method, url, **kwargs):
 
 def activate_sentinel():
     """Activates the Sentinel monitoring system."""
+    global _sentinel_active
+    if _sentinel_active:
+        audit("SYSTEM", "Sentinel already active. Skipping re-patch.", "INFO")
+        return
+
     audit("SYSTEM", "Sentinel Activated. Monitoring engaged.", "INFO")
     
     # Monkey Patching
@@ -125,8 +131,24 @@ def activate_sentinel():
     subprocess.Popen = sentinel_popen
     os.system = sentinel_system
     requests.sessions.Session.request = sentinel_session_request
+    _sentinel_active = True
 
     # Airlock is passive, used when processing input explicitly
+
+def deactivate_sentinel():
+    """Restores original runtime functions and disables Sentinel interception."""
+    global _sentinel_active
+    if not _sentinel_active:
+        audit("SYSTEM", "Sentinel already inactive. Nothing to restore.", "INFO")
+        return
+
+    builtins.open = _original_open
+    subprocess.run = _original_run
+    subprocess.Popen = _original_popen
+    os.system = _original_os_system
+    requests.sessions.Session.request = _original_session_request
+    _sentinel_active = False
+    audit("SYSTEM", "Sentinel Deactivated. Original runtime restored.", "INFO")
     
 def scan_input(text):
     """
