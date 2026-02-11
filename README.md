@@ -29,6 +29,12 @@ Project Sentinel is a "Sidecar Supervisor" middleware designed to protect users 
 
 ### Quickstart
 
+One-command demo:
+
+```bash
+./run_demo.sh
+```
+
 Build:
 
 ```bash
