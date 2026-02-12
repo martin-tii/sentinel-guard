@@ -2,6 +2,117 @@ import requests
 from .utils import audit
 
 
+class PromptGuardDetector:
+    def __init__(self, config=None):
+        self.config = config or {}
+        self.enabled = bool(self.config.get("enabled", False))
+        self.model = self.config.get("model", "meta-llama/Prompt-Guard-86M")
+        self.threshold = float(self.config.get("threshold", 0.8))
+        self.fail_open = bool(self.config.get("fail_open", False))
+        self.max_length = int(self.config.get("max_length", 512))
+        self._classifier = None
+        self._load_error = None
+
+    def _suspicious_label(self, label):
+        label_text = str(label).strip().lower()
+        if not label_text:
+            return False
+        return any(
+            token in label_text
+            for token in ("inject", "jailbreak", "attack", "malicious", "unsafe")
+        )
+
+    def _normalize_prediction(self, raw):
+        if isinstance(raw, list):
+            if not raw:
+                return {}
+            first = raw[0]
+            if isinstance(first, list):
+                return first[0] if first else {}
+            return first if isinstance(first, dict) else {}
+        return raw if isinstance(raw, dict) else {}
+
+    def _load_classifier(self):
+        if self._classifier is not None or self._load_error is not None:
+            return
+        try:
+            from transformers import pipeline
+            self._classifier = pipeline(
+                "text-classification",
+                model=self.model,
+                tokenizer=self.model,
+            )
+        except Exception as e:
+            self._load_error = str(e)
+            audit("PROMPT_GUARD", f"Unavailable: {e}", "WARNING")
+
+    def _availability_result(self):
+        reason = f"Prompt Guard unavailable: {self._load_error or 'unknown error'}"
+        if self.fail_open:
+            return {"ok": False, "safe": True, "reason": reason}
+        return {"ok": False, "safe": False, "reason": reason}
+
+    def scan_text(self, text, source="input"):
+        if not self.enabled:
+            return {
+                "ok": True,
+                "safe": True,
+                "enabled": False,
+                "reason": "Prompt Guard disabled",
+            }
+
+        self._load_classifier()
+        if self._classifier is None:
+            return self._availability_result()
+
+        try:
+            raw = self._classifier(
+                str(text),
+                truncation=True,
+                max_length=self.max_length,
+            )
+        except Exception as e:
+            self._load_error = str(e)
+            audit("PROMPT_GUARD", f"Inference error: {e}", "WARNING")
+            return self._availability_result()
+
+        pred = self._normalize_prediction(raw)
+        label = str(pred.get("label", "")).strip()
+        score_raw = pred.get("score", 0.0)
+        try:
+            score = float(score_raw)
+        except (TypeError, ValueError):
+            score = 0.0
+
+        suspicious = self._suspicious_label(label) and score >= self.threshold
+        if suspicious:
+            reason = (
+                f"Prompt Guard flagged {source} as suspicious "
+                f"(label={label}, score={score:.3f}, threshold={self.threshold:.3f})."
+            )
+            audit("PROMPT_GUARD", reason, "BLOCKED")
+            return {
+                "ok": True,
+                "safe": False,
+                "reason": reason,
+                "label": label,
+                "score": score,
+            }
+
+        audit(
+            "PROMPT_GUARD",
+            f"{source} classified as non-suspicious (label={label or 'unknown'}, score={score:.3f}).",
+            "ALLOWED",
+        )
+        return {
+            "ok": True,
+            "safe": True,
+            "label": label,
+            "score": score,
+            "reason": "Prompt Guard did not flag input",
+        }
+
+
 class AIJudge:
     def __init__(self, config=None):
         self.config = config or {}
@@ -10,6 +121,7 @@ class AIJudge:
         self.fail_open = self.config.get("fail_open", False)
         self.risk_threshold = float(self.config.get("risk_threshold", 0.7))
         self.runtime_judge_threshold = float(self.config.get("runtime_judge_threshold", 0.4))
+        self.prompt_guard = PromptGuardDetector(self.config.get("prompt_guard", {}))
 
     def call_ollama(self, prompt):
         """Raw call to Ollama API."""
@@ -29,8 +141,16 @@ class AIJudge:
 
     def check_input_safety(self, text):
         """
-        Asks LlamaGuard if the user input is safe.
+        Layered input guard:
+        1) Prompt Guard (optional) for prompt injection/jailbreak patterns.
+        2) LlamaGuard for broad unsafe content checks.
         """
+        prompt_guard_result = self.check_prompt_injection(text, source="user_input")
+        if not prompt_guard_result.get("safe", True):
+            reason = prompt_guard_result.get("reason", "Prompt Guard blocked input")
+            audit("AI_JUDGE", f"Input blocked by Prompt Guard: {reason}", "BLOCKED")
+            return {"safe": False, "reason": reason}
+
         # LlamaGuard 3 expects the raw input; it has internal templates.
         # We wrap it simply to define the task if needed, but raw usually works for basic checks.
         judge_result = self.call_ollama(text)
@@ -47,6 +167,9 @@ class AIJudge:
         
         audit("AI_JUDGE", "Input looks safe", "ALLOWED")
         return {"safe": True}
+
+    def check_prompt_injection(self, text, source="input"):
+        return self.prompt_guard.scan_text(text, source=source)
 
     def _looks_like_command_tool(self, tool):
         tool_name = str(tool).lower()

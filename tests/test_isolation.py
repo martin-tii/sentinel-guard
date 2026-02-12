@@ -201,7 +201,7 @@ class IsolationCommandBuildTests(unittest.TestCase):
                 seccomp_profile="strict",
             )
             cmd = build_docker_run_command(["python", "app.py"], cfg)
-            self.assertIn(f"seccomp={seccomp}", " ".join(cmd))
+            self.assertIn(f"seccomp={seccomp.resolve()}", " ".join(cmd))
 
     def test_invalid_seccomp_profile_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:

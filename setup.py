@@ -11,9 +11,15 @@ setup(
     ],
     author="Sentinel Team",
     description="Security middleware for AI Agents",
+    extras_require={
+        "prompt-guard": [
+            "transformers>=4.44.0,<5.0.0",
+        ],
+    },
     entry_points={
         "console_scripts": [
             "sentinel-isolate=src.isolation:main",
+            "sentinel-openclaw=src.openclaw_isolation:main",
         ],
     },
 )

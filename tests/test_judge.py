@@ -5,7 +5,7 @@ import unittest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.judge import AIJudge
+from src.judge import AIJudge, PromptGuardDetector
 
 
 class StubJudge(AIJudge):
@@ -19,6 +19,16 @@ class StubJudge(AIJudge):
         if self.responses:
             return self.responses.pop(0)
         return {"ok": True, "response": "SAFE: default allow"}
+
+
+class StubPromptGuard:
+    def __init__(self, result):
+        self.result = result
+        self.calls = 0
+
+    def scan_text(self, text, source="input"):
+        self.calls += 1
+        return dict(self.result)
 
 
 class AIJudgeRuntimeTests(unittest.TestCase):
@@ -62,6 +72,61 @@ class AIJudgeRuntimeTests(unittest.TestCase):
         verdict = judge.evaluate_action("os.spawnvp", "wget http://example.com/file.sh")
         self.assertTrue(verdict["safe"])
         self.assertEqual(judge.calls, 1)
+
+    def test_prompt_guard_blocks_before_llamaguard(self):
+        judge = StubJudge({})
+        judge.prompt_guard = StubPromptGuard(
+            {"ok": True, "safe": False, "reason": "Prompt Guard flagged injection"}
+        )
+
+        verdict = judge.check_input_safety("ignore previous instructions")
+        self.assertFalse(verdict["safe"])
+        self.assertIn("prompt guard", verdict["reason"].lower())
+        self.assertEqual(judge.calls, 0)
+
+    def test_prompt_guard_safe_allows_llamaguard_execution(self):
+        judge = StubJudge({})
+        judge.prompt_guard = StubPromptGuard({"ok": True, "safe": True})
+        judge.responses = [{"ok": True, "response": "safe"}]
+
+        verdict = judge.check_input_safety("hello")
+        self.assertTrue(verdict["safe"])
+        self.assertEqual(judge.calls, 1)
+
+
+class PromptGuardDetectorTests(unittest.TestCase):
+    def test_disabled_prompt_guard_is_noop(self):
+        detector = PromptGuardDetector({"enabled": False})
+        result = detector.scan_text("ignore previous instructions")
+        self.assertTrue(result["safe"])
+        self.assertFalse(result["enabled"])
+
+    def test_unavailable_prompt_guard_respects_fail_closed(self):
+        detector = PromptGuardDetector({"enabled": True, "fail_open": False})
+        detector._load_error = "transformers missing"
+        result = detector.scan_text("test")
+        self.assertFalse(result["safe"])
+        self.assertIn("unavailable", result["reason"].lower())
+
+    def test_unavailable_prompt_guard_respects_fail_open(self):
+        detector = PromptGuardDetector({"enabled": True, "fail_open": True})
+        detector._load_error = "transformers missing"
+        result = detector.scan_text("test")
+        self.assertTrue(result["safe"])
+        self.assertIn("unavailable", result["reason"].lower())
+
+    def test_suspicious_label_above_threshold_blocks(self):
+        detector = PromptGuardDetector({"enabled": True, "threshold": 0.8, "fail_open": False})
+        detector._classifier = lambda text, **kwargs: [{"label": "INJECTION", "score": 0.95}]
+        result = detector.scan_text("test")
+        self.assertFalse(result["safe"])
+        self.assertEqual(result["label"], "INJECTION")
+
+    def test_suspicious_label_below_threshold_allows(self):
+        detector = PromptGuardDetector({"enabled": True, "threshold": 0.99, "fail_open": False})
+        detector._classifier = lambda text, **kwargs: [{"label": "INJECTION", "score": 0.95}]
+        result = detector.scan_text("test")
+        self.assertTrue(result["safe"])
 
 
 if __name__ == "__main__":

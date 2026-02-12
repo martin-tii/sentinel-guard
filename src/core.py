@@ -33,6 +33,12 @@ judge_config.setdefault("model", "llama-guard3")
 judge_config.setdefault("risk_threshold", 0.7)
 judge_config.setdefault("runtime_judge_threshold", 0.4)
 judge_config.setdefault("fail_open", False)
+prompt_guard_cfg = judge_config.setdefault("prompt_guard", {})
+if isinstance(prompt_guard_cfg, dict):
+    prompt_guard_cfg.setdefault("enabled", False)
+    prompt_guard_cfg.setdefault("model", "meta-llama/Prompt-Guard-86M")
+    prompt_guard_cfg.setdefault("threshold", 0.8)
+    prompt_guard_cfg.setdefault("fail_open", False)
 ai_judge = AIJudge(judge_config)
 phishing_config = policy.policy.get("phishing", {})
 network_failsafe_config = policy.policy.get("network_failsafe", {})
@@ -1006,16 +1012,16 @@ def deactivate_sentinel():
 def scan_input(text):
     """
     Public API for the Airlock.
-    Now checks LlamaGuard FIRST, then keywords.
+    Checks Prompt Guard + LlamaGuard, then keywords.
     """
     _assert_runtime_integrity()
-    # 1. AI Safety Check (LlamaGuard)
+    # 1. AI Safety Check (Prompt Guard + LlamaGuard)
     safety = ai_judge.check_input_safety(text)
     if not safety["safe"]:
         _enforce_or_escalate(
             action="input_safety",
             target="user_input",
-            reason=f"🛡️ LlamaGuard Blocked Input: {safety['reason']}",
+            reason=f"AI input guard blocked input: {safety['reason']}",
             recommendation="Reject unless you intentionally need to process unsafe input.",
         )
 

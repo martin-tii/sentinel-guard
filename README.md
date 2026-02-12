@@ -4,6 +4,7 @@ Sentinel Guard is a security sidecar for AI agents.
 
 It provides:
 - Input safety checks (keywords + AI judge)
+- Optional Prompt Guard layer for prompt injection/jailbreak detection
 - Runtime action controls (file/command/network policies)
 - Human-approval escalation
 - Isolation-first execution with hardened Docker (`sentinel-isolate`)
@@ -16,17 +17,38 @@ Use isolation mode for untrusted workloads:
 sentinel-isolate --build-if-missing -- python your_agent.py
 ```
 
+For official OpenClaw CLI workloads, use:
+
+```bash
+sentinel-openclaw -- gateway --port 18789
+```
+
 If you are onboarding a new workload, start with seccomp complain mode, then tighten:
 
 ```bash
 sentinel-isolate --seccomp-mode log --build-if-missing -- python your_agent.py
 ```
 
-For networked workloads, prefer enforced proxy egress:
+For networked workloads, use the Docker Compose proxied profile as the gold standard:
 
 ```bash
-sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py
+docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
 ```
+
+`sentinel-isolate --network bridge --enforce-proxy --proxy ...` is a lower-assurance option.
+It relies on proxy environment variables inside the container. A malicious payload with code execution
+can attempt direct egress if host/network topology does not block it.
+
+## Input Guard Layers
+
+Sentinel can use both models as a layered defense:
+
+- Prompt Guard (`meta-llama/Prompt-Guard-86M` via Hugging Face `transformers`):
+  - Specialized detector for prompt injection and jailbreak patterns.
+- Llama Guard (configured through the existing judge endpoint):
+  - Broader safety classification layer.
+
+They overlap partially, but are not identical. Prompt Guard is a specialized pre-filter; Llama Guard remains the broader policy check.
 
 ## Important Security Note
 
@@ -45,7 +67,7 @@ Blocked actions can default to user-approval prompts when no custom handler is s
 - Configuration and env vars: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
 - Deployment hardening: [DEPLOYMENT.md](DEPLOYMENT.md)
 - Security posture: [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md)
-- Moltbot integration: [docs/MOLTBOT_INTEGRATION.md](docs/MOLTBOT_INTEGRATION.md)
+- OpenClaw integration: [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
 - Integrity/performance benchmark: [scripts/benchmark_integrity.py](scripts/benchmark_integrity.py)
 
 ## Approval UI Preview
@@ -58,3 +80,14 @@ Blocked actions can default to user-approval prompts when no custom handler is s
 pip install -e .
 pytest -q
 ```
+
+To enable Prompt Guard support:
+
+```bash
+pip install -e ".[prompt-guard]"
+# plus an inference backend such as PyTorch if not already installed
+```
+
+When Prompt Guard is enabled in `sentinel.yaml`, make sure model access is available in your environment:
+- You may need Hugging Face authentication/access approval for Meta model artifacts.
+- Use `huggingface-cli login` (or `HF_TOKEN`) where required.

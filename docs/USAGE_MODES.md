@@ -30,6 +30,26 @@ sentinel-isolate \
 - `--seccomp-profile strict|datasci|custom`
 - `--seccomp-mode enforce|log|off`
 
+### Networked isolation levels
+
+Gold standard for networked isolation:
+
+```bash
+docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
+```
+
+- Mechanism: Docker network topology + proxy sidecar.
+- Security effect: direct egress is blocked by topology, not just app-level env vars.
+
+Lower-assurance alternative:
+
+```bash
+sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py
+```
+
+- Mechanism: proxy environment variables inside container.
+- Security effect: a malicious payload can try to unset/ignore proxy vars and attempt direct egress if topology/firewall allows it.
+
 ### Seccomp onboarding pattern
 
 1. Start with `--seccomp-mode log` on a new workload.

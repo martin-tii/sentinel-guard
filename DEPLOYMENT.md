@@ -61,9 +61,14 @@ Uses normal container networking with Sentinel policy checks active.
 docker compose --profile standard run --rm sentinel-standard
 ```
 
-### 3) Proxied Mode (Recommended for networked isolation)
+### 3) Proxied Mode (Gold Standard for networked isolation)
 
 Routes traffic through a sidecar proxy with domain allowlist controls.
+
+Why this is stronger:
+- Control is enforced by Docker network topology.
+- The app container has no direct default egress route to the internet.
+- Even if agent code ignores or unsets `HTTP_PROXY`, direct egress remains blocked by topology.
 
 ```bash
 docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
@@ -83,6 +88,12 @@ sentinel-isolate \
   --network bridge \
   -- python your_agent.py
 ```
+
+Important nuance for networked runs:
+- `sentinel-isolate --network bridge --enforce-proxy` is convenient but weaker than proxied compose topology.
+- It relies on proxy environment variables (`HTTP_PROXY`/`HTTPS_PROXY`) inside the container.
+- A malicious payload may attempt direct connections if host/network controls permit them.
+- For high-assurance networked isolation, prefer `docker compose --profile proxied`.
 
 Seccomp troubleshooting modes:
 

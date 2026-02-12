@@ -28,6 +28,11 @@ judge:
   runtime_judge_threshold: 0.4
   risk_threshold: 0.7
   fail_open: false
+  prompt_guard:
+    enabled: false
+    model: "meta-llama/Prompt-Guard-86M"
+    threshold: 0.8
+    fail_open: false
 
 phishing:
   enabled: true
@@ -95,3 +100,4 @@ export SENTINEL_ENFORCE_PROXY=true
 - In production mode, signed + immutable policy settings are required.
 - In production isolated runs, networked mode is blocked unless `SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true` is set.
 - In compatibility mode, DNS checks can still have TOCTOU/rebinding risk; use isolation mode for hard boundaries.
+- Prompt Guard is optional and requires Hugging Face `transformers` plus an inference backend (for example, PyTorch) when enabled.

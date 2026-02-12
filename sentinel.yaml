@@ -29,6 +29,11 @@ judge:
   endpoint: "http://localhost:11434/api/generate"
   runtime_judge_threshold: 0.4
   risk_threshold: 0.7
+  prompt_guard:
+    enabled: false
+    model: "meta-llama/Prompt-Guard-86M"
+    threshold: 0.8
+    fail_open: false
 
 # 🎣 ANTI-PHISHING & SANDBOX EVENTS
 phishing:

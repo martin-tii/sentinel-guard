@@ -87,9 +87,9 @@ def _repo_root() -> Path:
 
 
 def _resolve_path(path: str) -> Path:
-    candidate = Path(path)
+    candidate = Path(path).expanduser()
     if candidate.is_absolute():
-        return candidate
+        return candidate.resolve()
     return (_repo_root() / candidate).resolve()
 
 
