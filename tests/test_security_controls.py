@@ -13,6 +13,7 @@ class SecurityControlTests(unittest.TestCase):
     def setUp(self):
         core.deactivate_sentinel()
         self._original_env = dict(os.environ)
+        os.environ["SENTINEL_APPROVAL_MODE"] = "reject"
 
     def tearDown(self):
         core.deactivate_sentinel()
