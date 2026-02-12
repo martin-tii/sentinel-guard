@@ -35,16 +35,92 @@ judge_config.setdefault("runtime_judge_threshold", 0.4)
 judge_config.setdefault("fail_open", False)
 prompt_guard_cfg = judge_config.setdefault("prompt_guard", {})
 if isinstance(prompt_guard_cfg, dict):
-    prompt_guard_cfg.setdefault("enabled", False)
+    prompt_guard_cfg.setdefault("enabled", True)
     prompt_guard_cfg.setdefault("model", "meta-llama/Prompt-Guard-86M")
     prompt_guard_cfg.setdefault("threshold", 0.8)
     prompt_guard_cfg.setdefault("fail_open", False)
+
+_DEFAULT_INJECTION_TEXT_CONTENT_TYPES = [
+    "text/*",
+    "application/json",
+    "application/*+json",
+    "application/xml",
+    "application/*+xml",
+    "application/javascript",
+    "application/x-www-form-urlencoded",
+]
+
+injection_scan_cfg = judge_config.setdefault("injection_scan", {})
+if not isinstance(injection_scan_cfg, dict):
+    injection_scan_cfg = {}
+    judge_config["injection_scan"] = injection_scan_cfg
+
+injection_scan_cfg.setdefault("enabled", True)
+injection_scan_cfg.setdefault("on_detection", "approval")
+injection_scan_cfg.setdefault("max_chars_per_source", 65536)
+injection_scan_cfg.setdefault("chunk_chars", 8192)
+
+injection_scan_file_cfg = injection_scan_cfg.setdefault("file_reads", {})
+if not isinstance(injection_scan_file_cfg, dict):
+    injection_scan_file_cfg = {}
+    injection_scan_cfg["file_reads"] = injection_scan_file_cfg
+injection_scan_file_cfg.setdefault("enabled", True)
+injection_scan_file_cfg.setdefault("allowlist_paths", [])
+
+injection_scan_network_cfg = injection_scan_cfg.setdefault("network_responses", {})
+if not isinstance(injection_scan_network_cfg, dict):
+    injection_scan_network_cfg = {}
+    injection_scan_cfg["network_responses"] = injection_scan_network_cfg
+injection_scan_network_cfg.setdefault("enabled", True)
+injection_scan_network_cfg.setdefault("allowlist_hosts", [])
+injection_scan_network_cfg.setdefault("text_content_types", list(_DEFAULT_INJECTION_TEXT_CONTENT_TYPES))
+
 ai_judge = AIJudge(judge_config)
 phishing_config = policy.policy.get("phishing", {})
 network_failsafe_config = policy.policy.get("network_failsafe", {})
 socket_failsafe_enabled = bool(network_failsafe_config.get("socket_connect", False))
 policy_integrity_config = policy.policy.get("policy_integrity", {})
 tamper_detection_enabled = bool(policy_integrity_config.get("tamper_detection", True))
+
+_injection_scan_enabled = bool(injection_scan_cfg.get("enabled", True))
+_injection_scan_on_detection = str(injection_scan_cfg.get("on_detection", "approval")).strip().lower()
+if _injection_scan_on_detection not in ("block", "approval", "audit"):
+    _injection_scan_on_detection = "approval"
+
+try:
+    _injection_scan_max_chars = max(1, int(injection_scan_cfg.get("max_chars_per_source", 65536)))
+except (TypeError, ValueError):
+    _injection_scan_max_chars = 65536
+try:
+    _injection_scan_chunk_chars = max(1, int(injection_scan_cfg.get("chunk_chars", 8192)))
+except (TypeError, ValueError):
+    _injection_scan_chunk_chars = 8192
+
+_injection_scan_file_reads_enabled = bool(injection_scan_file_cfg.get("enabled", True))
+_file_allow_raw = injection_scan_file_cfg.get("allowlist_paths", [])
+if isinstance(_file_allow_raw, (list, tuple, set)):
+    _injection_scan_file_allowlist_paths_raw = list(_file_allow_raw)
+elif _file_allow_raw:
+    _injection_scan_file_allowlist_paths_raw = [str(_file_allow_raw)]
+else:
+    _injection_scan_file_allowlist_paths_raw = []
+
+_injection_scan_network_responses_enabled = bool(injection_scan_network_cfg.get("enabled", True))
+_net_host_allow_raw = injection_scan_network_cfg.get("allowlist_hosts", [])
+if isinstance(_net_host_allow_raw, (list, tuple, set)):
+    _injection_scan_network_allowlist_hosts_raw = list(_net_host_allow_raw)
+elif _net_host_allow_raw:
+    _injection_scan_network_allowlist_hosts_raw = [str(_net_host_allow_raw)]
+else:
+    _injection_scan_network_allowlist_hosts_raw = []
+_text_content_raw = injection_scan_network_cfg.get("text_content_types", _DEFAULT_INJECTION_TEXT_CONTENT_TYPES)
+if not isinstance(_text_content_raw, (list, tuple, set)):
+    _text_content_raw = [_text_content_raw]
+_injection_scan_text_content_types = tuple(
+    str(item).strip().lower()
+    for item in _text_content_raw
+    if str(item).strip()
+)
 
 
 def _is_truthy(value):
@@ -100,6 +176,159 @@ def _should_run_integrity_check(force=False):
             return True
         return False
 
+
+def _resolve_scan_path(value):
+    if value is None or isinstance(value, int):
+        return None
+    try:
+        return pathlib.Path(os.fspath(value)).expanduser().resolve()
+    except Exception:
+        return None
+
+
+def _resolve_allowlist_paths(entries):
+    resolved = []
+    for entry in entries:
+        path = _resolve_scan_path(entry)
+        if path is not None:
+            resolved.append(path)
+    return tuple(resolved)
+
+
+def _normalize_host_allowlist(entries):
+    rules = []
+    for entry in entries:
+        host = ""
+        match = "exact"
+        if isinstance(entry, dict):
+            host = str(entry.get("host", "")).strip().lower().strip(".")
+            if str(entry.get("match", "exact")).strip().lower() == "subdomain":
+                match = "subdomain"
+        else:
+            host = str(entry).strip().lower().strip(".")
+        if host:
+            rules.append((host, match))
+    return tuple(rules)
+
+
+_injection_scan_file_allowlist_paths = _resolve_allowlist_paths(_injection_scan_file_allowlist_paths_raw)
+_injection_scan_network_allowlist_hosts = _normalize_host_allowlist(_injection_scan_network_allowlist_hosts_raw)
+
+
+def _should_skip_scan_for_path(path):
+    if not _injection_scan_file_reads_enabled:
+        return True
+    candidate = _resolve_scan_path(path)
+    if candidate is None:
+        return False
+    for allowed in _injection_scan_file_allowlist_paths:
+        try:
+            candidate.relative_to(allowed)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _should_skip_scan_for_host(host):
+    host_text = str(host or "").strip().lower().strip(".")
+    if not host_text:
+        return False
+    for allowed_host, mode in _injection_scan_network_allowlist_hosts:
+        if host_text == allowed_host:
+            return True
+        if mode == "subdomain" and host_text.endswith("." + allowed_host):
+            return True
+    return False
+
+
+def _is_text_like_content_type(content_type):
+    raw = str(content_type or "").strip().lower()
+    if not raw:
+        return False
+    content = raw.split(";", 1)[0].strip()
+    if not content:
+        return False
+    for allowed in _injection_scan_text_content_types:
+        if allowed.endswith("/*"):
+            if content.startswith(allowed[:-1]):
+                return True
+        elif allowed.startswith("application/*+") and content.startswith("application/"):
+            suffix = allowed[len("application/*") :]
+            if content.endswith(suffix):
+                return True
+        elif content == allowed:
+            return True
+    return False
+
+
+def _truncate_for_scan(text, max_chars):
+    if text is None:
+        return ""
+    normalized = str(text)
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[:max_chars]
+
+
+def _scan_target(source, metadata):
+    target = str(source)
+    if isinstance(metadata, dict):
+        details = []
+        for key in ("path", "host", "url", "content_type"):
+            value = metadata.get(key)
+            if value:
+                details.append(f"{key}={value}")
+        if details:
+            target = f"{target} ({', '.join(details)})"
+    return target
+
+
+def _raise_blocked_injection(reason, target):
+    audit("PROMPT_INJECTION", f"{target} | {reason}", "BLOCKED")
+    raise PermissionError(reason)
+
+
+def scan_untrusted_text(text, source, metadata=None):
+    """
+    Public helper for prompt-injection screening of untrusted text sources.
+    Intended for host integrations where automatic monkey patches are bypassed.
+    """
+    _assert_runtime_integrity()
+    if not _injection_scan_enabled:
+        return text
+    sample = _truncate_for_scan(text, _injection_scan_max_chars)
+    if not sample:
+        return text
+
+    result = ai_judge.check_prompt_injection(sample, source=source)
+    if result.get("safe", True):
+        return text
+
+    target = _scan_target(source, metadata)
+    label = result.get("label")
+    score = result.get("score")
+    threshold = getattr(ai_judge.prompt_guard, "threshold", None)
+    reason = (
+        f"{result.get('reason', 'Prompt injection detected')} "
+        f"[source={source}, label={label}, score={score}, threshold={threshold}]"
+    )
+
+    if _injection_scan_on_detection == "audit":
+        audit("PROMPT_INJECTION", f"{target} | {reason}", "BLOCKED")
+        return text
+
+    if _injection_scan_on_detection == "block":
+        _raise_blocked_injection(reason, target)
+
+    _enforce_or_escalate(
+        action="input_safety",
+        target=target,
+        reason=reason,
+        recommendation="Reject unless this untrusted text source is verified and expected.",
+    )
+    return text
+
 # --- Interceptors ---
 
 # 1. File System Interceptor (The Jail)
@@ -107,6 +336,7 @@ _original_open = builtins.open
 _original_io_open = io.open
 _original_path_open = pathlib.Path.open
 _original_os_open = os.open
+_original_input = builtins.input
 
 
 def _enforce_or_escalate(action, target, reason, recommendation):
@@ -130,6 +360,100 @@ def _should_bypass_file_policy(target):
     return False
 
 
+def _mode_reads_text(mode):
+    mode_text = str(mode or "")
+    if "b" in mode_text:
+        return False
+    if not mode_text:
+        return True
+    return ("r" in mode_text) or ("+" in mode_text)
+
+
+def _iter_scan_chunks(text, max_chars, chunk_chars):
+    if not text:
+        return
+    remaining = max_chars
+    cursor = 0
+    size = len(text)
+    while remaining > 0 and cursor < size:
+        take = min(chunk_chars, remaining, size - cursor)
+        if take <= 0:
+            break
+        yield text[cursor : cursor + take]
+        cursor += take
+        remaining -= take
+
+
+class SentinelTextReadProxy:
+    def __init__(self, handle, source, metadata=None):
+        self._handle = handle
+        self._source = source
+        self._metadata = metadata or {}
+        self._scanned_chars = 0
+
+    def _scan_text(self, value):
+        if not _injection_scan_enabled or not _injection_scan_file_reads_enabled:
+            return
+        if not isinstance(value, str) or not value:
+            return
+        if self._scanned_chars >= _injection_scan_max_chars:
+            return
+        remaining = _injection_scan_max_chars - self._scanned_chars
+        for chunk in _iter_scan_chunks(value, remaining, _injection_scan_chunk_chars):
+            scan_untrusted_text(chunk, source=self._source, metadata=self._metadata)
+            self._scanned_chars += len(chunk)
+            if self._scanned_chars >= _injection_scan_max_chars:
+                break
+
+    def read(self, *args, **kwargs):
+        data = self._handle.read(*args, **kwargs)
+        self._scan_text(data)
+        return data
+
+    def readline(self, *args, **kwargs):
+        data = self._handle.readline(*args, **kwargs)
+        self._scan_text(data)
+        return data
+
+    def readlines(self, *args, **kwargs):
+        lines = self._handle.readlines(*args, **kwargs)
+        for line in lines:
+            self._scan_text(line)
+        return lines
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        value = next(self._handle)
+        self._scan_text(value)
+        return value
+
+    def __enter__(self):
+        self._handle.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return self._handle.__exit__(exc_type, exc, tb)
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+
+def _wrap_text_reader_if_needed(handle, mode, path, source):
+    if not _injection_scan_enabled:
+        return handle
+    if not _mode_reads_text(mode):
+        return handle
+    resolved_path = _resolve_scan_path(path)
+    if resolved_path is None:
+        return handle
+    if _should_skip_scan_for_path(resolved_path):
+        return handle
+    metadata = {"path": str(resolved_path)}
+    return SentinelTextReadProxy(handle, source=source, metadata=metadata)
+
+
 def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
     _assert_runtime_integrity()
     # 1. Static Policy Check (The Law)
@@ -144,7 +468,8 @@ def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newl
                 recommendation="Reject unless the file path is expected for this task.",
             )
 
-    return _original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+    handle = _original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+    return _wrap_text_reader_if_needed(handle, mode, file, "file_read:open")
 
 
 def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
@@ -160,7 +485,8 @@ def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, n
                 recommendation="Reject unless the file path is expected for this task.",
             )
 
-    return _original_io_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+    handle = _original_io_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+    return _wrap_text_reader_if_needed(handle, mode, file, "file_read:io.open")
 
 
 def sentinel_path_open(self, mode='r', buffering=-1, encoding=None, errors=None, newline=None):
@@ -176,7 +502,8 @@ def sentinel_path_open(self, mode='r', buffering=-1, encoding=None, errors=None,
                 recommendation="Reject unless the file path is expected for this task.",
             )
 
-    return _original_path_open(self, mode, buffering, encoding, errors, newline)
+    handle = _original_path_open(self, mode, buffering, encoding, errors, newline)
+    return _wrap_text_reader_if_needed(handle, mode, self, "file_read:path.open")
 
 
 def _normalize_os_open_path(path):
@@ -209,6 +536,12 @@ def sentinel_os_open(path, flags, mode=0o777, *, dir_fd=None):
             )
 
     return _original_os_open(path, flags, mode)
+
+
+def sentinel_input(prompt=""):
+    _assert_runtime_integrity()
+    value = _original_input(prompt)
+    return scan_untrusted_text(value, source="user_input:builtins.input", metadata={"path": "stdin"})
 
 
 # 2. Command Execution Interceptor (The Governor)
@@ -516,6 +849,7 @@ def _is_production_mode():
 def _runtime_binding_getters():
     getters = {
         "builtins.open": lambda: builtins.open,
+        "builtins.input": lambda: builtins.input,
         "io.open": lambda: io.open,
         "pathlib.Path.open": lambda: pathlib.Path.open,
         "os.open": lambda: os.open,
@@ -710,9 +1044,234 @@ def _enforce_network_policy(url):
         )
 
 
+def _extract_content_type(headers):
+    if headers is None:
+        return ""
+    try:
+        value = headers.get("Content-Type")
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    try:
+        value = headers.get("content-type")
+        if value:
+            return str(value)
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_charset(content_type):
+    raw = str(content_type or "")
+    for part in raw.split(";")[1:]:
+        segment = part.strip()
+        if segment.lower().startswith("charset="):
+            return segment.split("=", 1)[1].strip().strip('"').strip("'")
+    return "utf-8"
+
+
+def _decode_text_payload(payload, content_type):
+    if isinstance(payload, str):
+        return payload
+    if not isinstance(payload, (bytes, bytearray)):
+        return None
+    charset = _extract_charset(content_type)
+    try:
+        return bytes(payload).decode(charset, errors="replace")
+    except Exception:
+        try:
+            return bytes(payload).decode("utf-8", errors="replace")
+        except Exception:
+            return None
+
+
+def _response_host(url):
+    try:
+        return (urlparse(str(url)).hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+
+class SentinelRequestsResponseProxy:
+    def __init__(self, response, source_url):
+        self._response = response
+        self._url = getattr(response, "url", source_url)
+        self._host = _response_host(self._url)
+        self._content_type = _extract_content_type(getattr(response, "headers", {}))
+        self._scanned_chars = 0
+        self._can_scan = (
+            _injection_scan_enabled
+            and _injection_scan_network_responses_enabled
+            and not _should_skip_scan_for_host(self._host)
+            and _is_text_like_content_type(self._content_type)
+        )
+
+    def _scan(self, text, source):
+        if not self._can_scan:
+            return
+        if not isinstance(text, str) or not text:
+            return
+        if self._scanned_chars >= _injection_scan_max_chars:
+            return
+        remaining = _injection_scan_max_chars - self._scanned_chars
+        metadata = {
+            "host": self._host,
+            "url": str(self._url),
+            "content_type": self._content_type,
+        }
+        for chunk in _iter_scan_chunks(text, remaining, _injection_scan_chunk_chars):
+            scan_untrusted_text(chunk, source=source, metadata=metadata)
+            self._scanned_chars += len(chunk)
+            if self._scanned_chars >= _injection_scan_max_chars:
+                break
+
+    @property
+    def text(self):
+        value = self._response.text
+        self._scan(value, "network_response:requests.text")
+        return value
+
+    def json(self, *args, **kwargs):
+        value = self._response.json(*args, **kwargs)
+        try:
+            raw = self._response.text
+        except Exception:
+            raw = ""
+        self._scan(raw, "network_response:requests.json")
+        return value
+
+    def iter_lines(self, *args, **kwargs):
+        for line in self._response.iter_lines(*args, **kwargs):
+            self._scan(_decode_text_payload(line, self._content_type), "network_response:requests.iter_lines")
+            yield line
+
+    def iter_content(self, *args, **kwargs):
+        decode_unicode = bool(kwargs.get("decode_unicode", False))
+        for chunk in self._response.iter_content(*args, **kwargs):
+            if decode_unicode:
+                self._scan(
+                    _decode_text_payload(chunk, self._content_type),
+                    "network_response:requests.iter_content",
+                )
+            yield chunk
+
+    def __iter__(self):
+        return iter(self._response)
+
+    def __enter__(self):
+        if hasattr(self._response, "__enter__"):
+            self._response.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if hasattr(self._response, "__exit__"):
+            return self._response.__exit__(exc_type, exc, tb)
+        return False
+
+    def __getattr__(self, name):
+        return getattr(self._response, name)
+
+
+class SentinelUrlopenResponseProxy:
+    def __init__(self, response, source_url):
+        self._response = response
+        self._url = source_url or getattr(response, "url", "")
+        try:
+            if hasattr(response, "geturl"):
+                self._url = response.geturl() or self._url
+        except Exception:
+            pass
+        self._host = _response_host(self._url)
+        headers = getattr(response, "headers", None)
+        if headers is None:
+            try:
+                headers = response.info()
+            except Exception:
+                headers = {}
+        self._content_type = _extract_content_type(headers)
+        self._scanned_chars = 0
+        self._can_scan = (
+            _injection_scan_enabled
+            and _injection_scan_network_responses_enabled
+            and not _should_skip_scan_for_host(self._host)
+            and _is_text_like_content_type(self._content_type)
+        )
+
+    def _scan(self, payload, source):
+        if not self._can_scan:
+            return
+        text = _decode_text_payload(payload, self._content_type)
+        if not text:
+            return
+        if self._scanned_chars >= _injection_scan_max_chars:
+            return
+        remaining = _injection_scan_max_chars - self._scanned_chars
+        metadata = {
+            "host": self._host,
+            "url": str(self._url),
+            "content_type": self._content_type,
+        }
+        for chunk in _iter_scan_chunks(text, remaining, _injection_scan_chunk_chars):
+            scan_untrusted_text(chunk, source=source, metadata=metadata)
+            self._scanned_chars += len(chunk)
+            if self._scanned_chars >= _injection_scan_max_chars:
+                break
+
+    def read(self, *args, **kwargs):
+        value = self._response.read(*args, **kwargs)
+        self._scan(value, "network_response:urlopen.read")
+        return value
+
+    def readline(self, *args, **kwargs):
+        value = self._response.readline(*args, **kwargs)
+        self._scan(value, "network_response:urlopen.readline")
+        return value
+
+    def readlines(self, *args, **kwargs):
+        lines = self._response.readlines(*args, **kwargs)
+        for line in lines:
+            self._scan(line, "network_response:urlopen.readlines")
+        return lines
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        value = next(self._response)
+        self._scan(value, "network_response:urlopen.iter")
+        return value
+
+    def __enter__(self):
+        if hasattr(self._response, "__enter__"):
+            self._response.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if hasattr(self._response, "__exit__"):
+            return self._response.__exit__(exc_type, exc, tb)
+        return False
+
+    def __getattr__(self, name):
+        return getattr(self._response, name)
+
+
+def _maybe_wrap_requests_response(response, source_url):
+    if not _injection_scan_enabled or not _injection_scan_network_responses_enabled:
+        return response
+    return SentinelRequestsResponseProxy(response, source_url)
+
+
+def _maybe_wrap_urlopen_response(response, source_url):
+    if not _injection_scan_enabled or not _injection_scan_network_responses_enabled:
+        return response
+    return SentinelUrlopenResponseProxy(response, source_url)
+
+
 def sentinel_session_request(self, method, url, **kwargs):
     _enforce_network_policy(url)
-    return _original_session_request(self, method, url, **kwargs)
+    response = _original_session_request(self, method, url, **kwargs)
+    return _maybe_wrap_requests_response(response, url)
 
 
 def _extract_urllib_url(target):
@@ -722,8 +1281,10 @@ def _extract_urllib_url(target):
 
 
 def sentinel_urlopen(url, *args, **kwargs):
-    _enforce_network_policy(_extract_urllib_url(url))
-    return _original_urlopen(url, *args, **kwargs)
+    target_url = _extract_urllib_url(url)
+    _enforce_network_policy(target_url)
+    response = _original_urlopen(url, *args, **kwargs)
+    return _maybe_wrap_urlopen_response(response, target_url)
 
 
 def _normalize_http_target(scheme, host, url):
@@ -885,6 +1446,7 @@ def activate_sentinel():
 
     # Monkey Patching
     builtins.open = sentinel_open
+    builtins.input = sentinel_input
     io.open = sentinel_io_open
     pathlib.Path.open = sentinel_path_open
     os.open = sentinel_os_open
@@ -951,6 +1513,7 @@ def deactivate_sentinel():
         return
 
     builtins.open = _original_open
+    builtins.input = _original_input
     io.open = _original_io_open
     pathlib.Path.open = _original_path_open
     os.open = _original_os_open
@@ -1015,8 +1578,11 @@ def scan_input(text):
     Checks Prompt Guard + LlamaGuard, then keywords.
     """
     _assert_runtime_integrity()
-    # 1. AI Safety Check (Prompt Guard + LlamaGuard)
-    safety = ai_judge.check_input_safety(text)
+    # 1. Prompt-injection screening with configured detection behavior.
+    scan_untrusted_text(text, source="user_input:scan_input", metadata={"path": "api"})
+
+    # 2. LlamaGuard broad safety check.
+    safety = ai_judge.check_input_safety(text, include_prompt_guard=False)
     if not safety["safe"]:
         _enforce_or_escalate(
             action="input_safety",
@@ -1025,7 +1591,7 @@ def scan_input(text):
             recommendation="Reject unless you intentionally need to process unsafe input.",
         )
 
-    # 2. Keyword Check (Legacy/Fast)
+    # 3. Keyword Check (Legacy/Fast)
     try:
         return policy.check_input(text)
     except ValueError as e:

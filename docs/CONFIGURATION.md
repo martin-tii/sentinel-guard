@@ -29,10 +29,29 @@ judge:
   risk_threshold: 0.7
   fail_open: false
   prompt_guard:
-    enabled: false
+    enabled: true
     model: "meta-llama/Prompt-Guard-86M"
     threshold: 0.8
     fail_open: false
+  injection_scan:
+    enabled: true
+    on_detection: "approval"   # block | approval | audit
+    max_chars_per_source: 65536
+    chunk_chars: 8192
+    file_reads:
+      enabled: true
+      allowlist_paths: []
+    network_responses:
+      enabled: true
+      allowlist_hosts: []
+      text_content_types:
+        - "text/*"
+        - "application/json"
+        - "application/*+json"
+        - "application/xml"
+        - "application/*+xml"
+        - "application/javascript"
+        - "application/x-www-form-urlencoded"
 
 phishing:
   enabled: true
@@ -100,4 +119,6 @@ export SENTINEL_ENFORCE_PROXY=true
 - In production mode, signed + immutable policy settings are required.
 - In production isolated runs, networked mode is blocked unless `SENTINEL_ALLOW_NETWORK_IN_PRODUCTION=true` is set.
 - In compatibility mode, DNS checks can still have TOCTOU/rebinding risk; use isolation mode for hard boundaries.
-- Prompt Guard is optional and requires Hugging Face `transformers` plus an inference backend (for example, PyTorch) when enabled.
+- Prompt Guard is enabled by default and requires Hugging Face `transformers` plus an inference backend (for example, PyTorch).
+- `judge.injection_scan` controls automatic prompt-injection scanning across built-in user input, text file reads, and text-like HTTP responses.
+- With `on_detection: approval`, headless/no-handler environments fail safe to reject.

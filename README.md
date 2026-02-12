@@ -4,7 +4,7 @@ Sentinel Guard is a security sidecar for AI agents.
 
 It provides:
 - Input safety checks (keywords + AI judge)
-- Optional Prompt Guard layer for prompt injection/jailbreak detection
+- Prompt Guard layer for prompt injection/jailbreak detection (default on)
 - Runtime action controls (file/command/network policies)
 - Human-approval escalation
 - Isolation-first execution with hardened Docker (`sentinel-isolate`)
@@ -50,6 +50,13 @@ Sentinel can use both models as a layered defense:
 
 They overlap partially, but are not identical. Prompt Guard is a specialized pre-filter; Llama Guard remains the broader policy check.
 
+By default, Sentinel also performs automatic prompt-injection scanning on:
+- `builtins.input()` values
+- text file reads in intercepted `open`/`io.open`/`Path.open`
+- text-like HTTP response bodies from intercepted `requests`/`urlopen`
+
+Detection handling defaults to approval-required (`judge.injection_scan.on_detection: approval`), which fails safe to reject in headless/no-handler environments.
+
 ## Important Security Note
 
 Compatibility mode (`activate_sentinel()` in-process hooks) is guardrails for accidental/buggy behavior, not a hard containment boundary against determined malicious code.
@@ -88,6 +95,6 @@ pip install -e ".[prompt-guard]"
 # plus an inference backend such as PyTorch if not already installed
 ```
 
-When Prompt Guard is enabled in `sentinel.yaml`, make sure model access is available in your environment:
+When Prompt Guard is enabled in `sentinel.yaml` (default), make sure model access is available in your environment:
 - You may need Hugging Face authentication/access approval for Meta model artifacts.
 - Use `huggingface-cli login` (or `HF_TOKEN`) where required.

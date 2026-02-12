@@ -74,6 +74,22 @@ deactivate_sentinel()
 
 Important: compatibility mode is not a hard containment boundary against determined malicious code in the same interpreter.
 
+### Automatic Prompt-Injection Scan (Compatibility Mode)
+
+When compatibility mode is active, Sentinel automatically scans untrusted text from:
+
+- `builtins.input()` values
+- text file reads through patched `open`/`io.open`/`Path.open`
+- text-like HTTP response bodies through patched `requests` and `urlopen`
+
+Behavior is configured under `judge.injection_scan`:
+
+- `on_detection: approval` (default) escalates to approval handler.
+- `on_detection: block` denies immediately.
+- `on_detection: audit` logs but allows.
+
+If no approval handler is available in headless mode, approval flow rejects by default.
+
 ## Approval Handlers
 
 ```python

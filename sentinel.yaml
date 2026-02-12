@@ -30,10 +30,29 @@ judge:
   runtime_judge_threshold: 0.4
   risk_threshold: 0.7
   prompt_guard:
-    enabled: false
+    enabled: true
     model: "meta-llama/Prompt-Guard-86M"
     threshold: 0.8
     fail_open: false
+  injection_scan:
+    enabled: true
+    on_detection: "approval"   # block | approval | audit
+    max_chars_per_source: 65536
+    chunk_chars: 8192
+    file_reads:
+      enabled: true
+      allowlist_paths: []
+    network_responses:
+      enabled: true
+      allowlist_hosts: []
+      text_content_types:
+        - "text/*"
+        - "application/json"
+        - "application/*+json"
+        - "application/xml"
+        - "application/*+xml"
+        - "application/javascript"
+        - "application/x-www-form-urlencoded"
 
 # 🎣 ANTI-PHISHING & SANDBOX EVENTS
 phishing:

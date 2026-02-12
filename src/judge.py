@@ -49,8 +49,8 @@ class PromptGuardDetector:
     def _availability_result(self):
         reason = f"Prompt Guard unavailable: {self._load_error or 'unknown error'}"
         if self.fail_open:
-            return {"ok": False, "safe": True, "reason": reason}
-        return {"ok": False, "safe": False, "reason": reason}
+            return {"ok": False, "safe": True, "reason": reason, "label": None, "score": None}
+        return {"ok": False, "safe": False, "reason": reason, "label": None, "score": None}
 
     def scan_text(self, text, source="input"):
         if not self.enabled:
@@ -59,6 +59,8 @@ class PromptGuardDetector:
                 "safe": True,
                 "enabled": False,
                 "reason": "Prompt Guard disabled",
+                "label": None,
+                "score": None,
             }
 
         self._load_classifier()
@@ -107,6 +109,7 @@ class PromptGuardDetector:
         return {
             "ok": True,
             "safe": True,
+            "enabled": True,
             "label": label,
             "score": score,
             "reason": "Prompt Guard did not flag input",
@@ -139,17 +142,18 @@ class AIJudge:
                 return {"ok": True, "response": "safe"}
             return {"ok": False, "response": "", "reason": "AI Judge unavailable"}
 
-    def check_input_safety(self, text):
+    def check_input_safety(self, text, include_prompt_guard=True):
         """
         Layered input guard:
         1) Prompt Guard (optional) for prompt injection/jailbreak patterns.
         2) LlamaGuard for broad unsafe content checks.
         """
-        prompt_guard_result = self.check_prompt_injection(text, source="user_input")
-        if not prompt_guard_result.get("safe", True):
-            reason = prompt_guard_result.get("reason", "Prompt Guard blocked input")
-            audit("AI_JUDGE", f"Input blocked by Prompt Guard: {reason}", "BLOCKED")
-            return {"safe": False, "reason": reason}
+        if include_prompt_guard:
+            prompt_guard_result = self.check_prompt_injection(text, source="user_input")
+            if not prompt_guard_result.get("safe", True):
+                reason = prompt_guard_result.get("reason", "Prompt Guard blocked input")
+                audit("AI_JUDGE", f"Input blocked by Prompt Guard: {reason}", "BLOCKED")
+                return {"safe": False, "reason": reason}
 
         # LlamaGuard 3 expects the raw input; it has internal templates.
         # We wrap it simply to define the task if needed, but raw usually works for basic checks.
