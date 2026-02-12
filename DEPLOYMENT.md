@@ -86,6 +86,7 @@ sentinel-isolate \
   --seccomp-profile strict \
   --seccomp-mode enforce \
   --network bridge \
+  --publish 18789:18789 \
   -- python your_agent.py
 ```
 

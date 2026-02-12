@@ -76,7 +76,7 @@ If you use Sentinel isolation for networked workloads, prefer topology-enforced 
 Use Sentinel's OpenClaw launcher for Node CLI style workflows:
 
 ```bash
-sentinel-openclaw -- gateway --port 18789
+sentinel-openclaw --publish 18789:18789 -- gateway --port 18789
 ```
 
 Other examples:
@@ -98,6 +98,7 @@ docker build -t openclaw:local -f Dockerfile .
 
 - By default, the launcher sets `HOME=/workspace` inside the container so OpenClaw state persists under the mounted workspace.
 - Override the executable with `--openclaw-bin` if needed.
+- If you want to access the Gateway UI from your host browser, you must publish the port via `--publish`.
 
 ## Backward Compatibility
 

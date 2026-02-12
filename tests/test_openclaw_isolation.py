@@ -34,6 +34,8 @@ class OpenClawIsolationTests(unittest.TestCase):
                     str(policy),
                     "--image",
                     "openclaw:test",
+                    "--publish",
+                    "18789:18789",
                     "--",
                     "gateway",
                     "--port",
@@ -52,6 +54,7 @@ class OpenClawIsolationTests(unittest.TestCase):
         self.assertEqual(cmd[3:], ["gateway", "--port", "18789"])
         self.assertEqual(cfg.image, "openclaw:test")
         self.assertEqual(cfg.network_mode, "bridge")
+        self.assertEqual(cfg.publish_ports, ("18789:18789",))
         self.assertFalse(cfg.build_if_missing)
 
     @patch("src.openclaw_isolation.run_isolated")

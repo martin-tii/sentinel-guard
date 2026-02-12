@@ -60,6 +60,12 @@ def _parse_args(argv: Optional[Sequence[str]] = None):
         help="Container network mode.",
     )
     parser.add_argument(
+        "--publish",
+        action="append",
+        default=[],
+        help="Publish ports in HOST_PORT:CONTAINER_PORT (repeatable). Requires network bridge/host.",
+    )
+    parser.add_argument(
         "--proxy",
         default=os.environ.get("SENTINEL_PROXY", ""),
         help="Optional outbound proxy URL passed as HTTP(S)_PROXY in container.",
@@ -127,6 +133,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         seccomp_profile=args.seccomp_profile,
         seccomp_mode=args.seccomp_mode,
         network_mode=args.network,
+        publish_ports=tuple(args.publish or ()),
         proxy=args.proxy,
         no_proxy=args.no_proxy,
         enforce_proxy=args.enforce_proxy,

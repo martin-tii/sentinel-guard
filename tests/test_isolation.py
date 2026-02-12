@@ -62,6 +62,42 @@ class IsolationCommandBuildTests(unittest.TestCase):
             with self.assertRaises(IsolationError):
                 build_docker_run_command(["python", "app.py"], cfg)
 
+    def test_publish_requires_network(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                network_mode="none",
+                publish_ports=("18789:18789",),
+            )
+            with self.assertRaises(IsolationError):
+                build_docker_run_command(["python", "app.py"], cfg)
+
+    def test_publish_adds_publish_flags(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                image="sentinel-guard:test",
+                workspace=str(workspace),
+                policy=str(policy),
+                network_mode="bridge",
+                publish_ports=("18789:18789",),
+            )
+            cmd = build_docker_run_command(["python", "app.py"], cfg)
+            joined = " ".join(cmd)
+            self.assertIn("--publish 18789:18789", joined)
+
     def test_missing_command_rejected(self):
         with self.assertRaises(IsolationError):
             build_docker_run_command([])

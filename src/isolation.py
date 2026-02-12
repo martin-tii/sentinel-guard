@@ -25,6 +25,7 @@ class IsolationConfig:
     pids_limit: int = 256
     memory: str = "512m"
     cpus: str = "1.0"
+    publish_ports: Sequence[str] = ()
     proxy: str = ""
     no_proxy: str = ""
     enforce_proxy: bool = False
@@ -80,6 +81,46 @@ def _effective_seccomp_path(cfg: IsolationConfig) -> str:
     if profile in ("strict", "datasci"):
         return _default_seccomp_for_profile(profile)
     return cfg.seccomp
+
+
+def _validate_publish_ports(bindings: Sequence[str]) -> list[str]:
+    validated = []
+    for binding in bindings or ():
+        raw = str(binding).strip()
+        if not raw:
+            continue
+        protocol = ""
+        if "/" in raw:
+            raw_base, protocol = raw.rsplit("/", 1)
+            protocol = protocol.strip().lower()
+            if protocol not in ("tcp", "udp"):
+                raise IsolationError(f"Invalid publish protocol in '{binding}'. Use tcp or udp.")
+        else:
+            raw_base = raw
+
+        parts = raw_base.split(":")
+        if len(parts) == 2:
+            host_port, container_port = parts
+        elif len(parts) == 3:
+            host_ip, host_port, container_port = parts
+            if not str(host_ip).strip():
+                raise IsolationError(f"Invalid publish host in '{binding}'.")
+        else:
+            raise IsolationError(
+                f"Invalid publish mapping '{binding}'. Use HOST_PORT:CONTAINER_PORT "
+                f"or HOST_IP:HOST_PORT:CONTAINER_PORT."
+            )
+
+        for port_text in (host_port, container_port):
+            try:
+                port = int(str(port_text).strip())
+            except Exception:
+                raise IsolationError(f"Invalid publish port in '{binding}'.")
+            if port < 1 or port > 65535:
+                raise IsolationError(f"Publish port out of range in '{binding}'.")
+
+        validated.append(raw)
+    return validated
 
 
 def _repo_root() -> Path:
@@ -169,6 +210,9 @@ def build_docker_run_command(
 
     if cfg.network_mode not in ("none", "bridge", "host"):
         raise IsolationError("network_mode must be one of: none, bridge, host")
+    publish_ports = _validate_publish_ports(cfg.publish_ports)
+    if cfg.network_mode == "none" and publish_ports:
+        raise IsolationError("--publish requires --network bridge or --network host.")
     _enforce_production_network_policy(cfg)
     _enforce_proxy_policy(cfg)
     if cfg.seccomp_mode not in ("enforce", "log", "off"):
@@ -204,6 +248,9 @@ def build_docker_run_command(
         "--workdir",
         "/workspace",
     ]
+
+    for mapping in publish_ports:
+        run_cmd.extend(["--publish", mapping])
 
     effective_proxy = str(cfg.proxy).strip() or str(os.environ.get("SENTINEL_PROXY", "")).strip()
     if effective_proxy:
@@ -307,6 +354,12 @@ def _parse_args(argv: Optional[Sequence[str]] = None):
         help="Container network mode. Use 'none' for strongest isolation.",
     )
     parser.add_argument(
+        "--publish",
+        action="append",
+        default=[],
+        help="Publish ports in HOST_PORT:CONTAINER_PORT (repeatable). Requires network bridge/host.",
+    )
+    parser.add_argument(
         "--proxy",
         default=os.environ.get("SENTINEL_PROXY", ""),
         help="Optional outbound proxy URL passed as HTTP(S)_PROXY inside the container.",
@@ -350,6 +403,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         seccomp_profile=args.seccomp_profile,
         seccomp_mode=args.seccomp_mode,
         network_mode=args.network,
+        publish_ports=tuple(args.publish or ()),
         proxy=args.proxy,
         no_proxy=args.no_proxy,
         enforce_proxy=args.enforce_proxy,
