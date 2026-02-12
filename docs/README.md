@@ -11,6 +11,7 @@ Use this page as the documentation entry point.
 ## Security and Operations
 
 - Deployment hardening: [../DEPLOYMENT.md](../DEPLOYMENT.md)
+- Architecture overview (pillars of protection): [../README.md#architecture-pillars](../README.md#architecture-pillars)
 - Security posture and residual risks: [../SECURITY_ASSESSMENT.md](../SECURITY_ASSESSMENT.md)
 - OpenClaw integration: [OPENCLAW_INTEGRATION.md](./OPENCLAW_INTEGRATION.md)
 - Approval UI details: [Usage Modes](./USAGE_MODES.md#approval-handlers)
@@ -18,6 +19,84 @@ Use this page as the documentation entry point.
 ## Approval UI
 
 ![Sentinel approval popup](./images/approval-popup.png)
+
+## How Sentinel Decides (Decision Flow)
+
+This diagram shows the high-level decision pipeline Sentinel applies when an agent attempts an action: integrity checks first, then lane-specific controls for input, network, and commands, with optional AI Judge and human-approval escalation.
+
+```mermaid
+flowchart TD
+    %% Main Entry
+    Start([Agent Action Attempt]) --> TamperCheck{Integrity Check}
+    TamperCheck -- Fail --> Crash[💥 Runtime Error]
+    TamperCheck -- Pass --> Router{Action Type?}
+
+    Block[🛑 Block Action]
+
+    %% Lane 1: Input Security (The Airlock)
+    subgraph Input_Lane [Input Security]
+        direction TB
+        PG[🛡️ Prompt Guard] -->|Safe| LG[🦙 Llama Guard]
+        PG -->|Injection Detected| BlockInput[🛑 Block Input]
+        LG -->|Unsafe Content| BlockInput
+    end
+
+    %% Lane 2: Network Security (The Firewall)
+    subgraph Network_Lane [Network Security]
+        direction TB
+        Phish[🎣 Phishing Detector] -->|Safe| NetPol[📜 Static Host Policy]
+        Phish -->|Suspicious| BlockNet[🛑 Block Request]
+        NetPol -->|Denied| AskHuman
+    end
+
+    %% Lane 3: Command Security (The Governor)
+    subgraph Command_Lane [Command Security]
+        direction TB
+        Token[💻 Shell Tokenizer] -->|Safe Syntax| CmdPol[📜 Static Cmd Policy]
+        Token -->|Injection Risk| BlockCmd[🛑 Block Command]
+        CmdPol -->|Denied| AskHuman
+        CmdPol -->|Allowed| Heuristics{Heuristic Risk?}
+        Heuristics -- High --> AIJudge[⚖️ AI Judge Review]
+    end
+
+    %% Routing
+    Router -- "Text Input" --> PG
+    Router -- "Network Req" --> Phish
+    Router -- "Command" --> Token
+
+    %% Final Decisions
+    LG -->|Safe| Allow[✅ Allow Action]
+    NetPol -->|Allowed| Allow
+    Heuristics -- Low --> Allow
+    AIJudge -- Safe --> Allow
+    
+    %% Approval Flow
+    AIJudge -- Unsafe --> AskHuman
+    AskHuman{👤 Human Approval}
+    AskHuman -- Approve --> Allow
+    AskHuman -- Reject --> Block
+
+    %% Converge blocks
+    BlockInput --> Block
+    BlockNet --> Block
+    BlockCmd --> Block
+
+    style Start fill:#2ecc71,stroke:#27ae60,color:white
+    style Allow fill:#2ecc71,stroke:#27ae60,color:white
+    style Block fill:#e74c3c,stroke:#c0392b,color:white
+    style BlockInput fill:#e74c3c,stroke:#c0392b,color:white
+    style BlockNet fill:#e74c3c,stroke:#c0392b,color:white
+    style BlockCmd fill:#e74c3c,stroke:#c0392b,color:white
+    style AskHuman fill:#f1c40f,stroke:#f39c12,color:black
+```
+
+### Configure These Decisions
+
+- Integrity check gate: `policy_integrity.tamper_detection` (see `sentinel.yaml`)
+- Prompt-injection lane: `judge.prompt_guard.*` and `judge.injection_scan.*`
+- Network lane: `allowed_hosts` plus the proxied run mode (topology + sidecar) described in [../DEPLOYMENT.md](../DEPLOYMENT.md)
+- Command lane: `allowed_commands` and `blocked_command_bases`
+- Human escalation: `SENTINEL_APPROVAL_MODE` and custom approval handlers (see [Usage Modes](./USAGE_MODES.md#approval-handlers))
 
 ## Typical Paths
 
@@ -35,7 +114,7 @@ Use this page as the documentation entry point.
 ## Prompt Injection Defense
 
 Sentinel supports an optional Prompt Guard pre-filter for prompt injection/jailbreak detection.
-This is separate from the broad AI judge (Llama Guard) and can be layered.
+This is separate from the broad AI Judge (Llama Guard) and can be layered.
 
 See:
 - Configuration: [Configuration](./CONFIGURATION.md)

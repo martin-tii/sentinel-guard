@@ -69,6 +69,33 @@ Why this is stronger:
 - Control is enforced by Docker network topology.
 - The app container has no direct default egress route to the internet.
 - Even if agent code ignores or unsets `HTTP_PROXY`, direct egress remains blocked by topology.
+  
+```mermaid
+flowchart LR
+    subgraph Isolation_Zone ["Isolation Zone (No Internet Access)"]
+        style Isolation_Zone fill:#1b0b10,stroke:#ef4444,stroke-width:2px,color:#f8fafc
+        Agent[("🤖 Agent Container")]
+    end
+
+    subgraph DMZ ["DMZ (Egress Control)"]
+        style DMZ fill:#1a1408,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
+        Proxy[("🚦 Squid Proxy")]
+    end
+
+    Internet((☁️ Internet))
+
+    Agent -- "1. HTTP_PROXY" --> Proxy
+    Agent -.-> |"Direct Connect (Blocked)"| Internet
+    Proxy -- "2. Check Allowlist" --> Internet
+
+    style Agent fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style Proxy fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style Internet fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+
+    linkStyle 0 stroke:#22c55e,stroke-width:3px;
+    linkStyle 1 stroke:#ef4444,stroke-width:3px,stroke-dasharray: 6 4;
+    linkStyle 2 stroke:#22c55e,stroke-width:3px;
+```
 
 ```bash
 docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied

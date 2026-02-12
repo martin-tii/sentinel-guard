@@ -3,7 +3,7 @@
 Sentinel Guard is a security sidecar for AI agents.
 
 It provides:
-- Input safety checks (keywords + AI judge)
+- Input safety checks (keywords + AI Judge)
 - Prompt Guard layer for prompt injection/jailbreak detection (default on)
 - Runtime action controls (file/command/network policies)
 - Human-approval escalation
@@ -66,6 +66,76 @@ Use `sentinel-isolate` for hard process/container boundaries.
 Blocked actions can default to user-approval prompts when no custom handler is set:
 - `SENTINEL_APPROVAL_MODE=auto` (default), `tkinter`, `console`, or `reject`.
 
+<a id="architecture-pillars"></a>
+## 🛡️ Architecture: The Pillars of Protection
+
+Sentinel Guard is isolation-first: run untrusted agent code inside a hardened Docker container via `sentinel-isolate`.
+Within the sandbox, Sentinel enforces policy from `sentinel.yaml` and applies runtime guardrails around file, command, and network actions.
+For text inputs and higher-risk actions, it can layer model-based checks (Prompt Guard + Llama Guard / AI Judge) on top of static policy.
+For networked workloads, proxied mode routes egress through a sidecar proxy with topology-enforced controls.
+When configured, suspicious or disallowed behavior can escalate to a human approval handler.
+
+Note: the following diagram is styled for dark backgrounds; in light mode it will still render, but with a darker look.
+
+```mermaid
+graph TD
+    subgraph Host_Machine ["Host Machine"]
+        style Host_Machine fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+
+        User((User)) -- "1. Start Agent" --> CLI["Sentinel CLI<br/>(sentinel-isolate)"]
+
+        subgraph Docker_Network ["Docker Internal Network"]
+            style Docker_Network fill:#0f172a,stroke:#38bdf8,stroke-width:2px,stroke-dasharray: 6 4,color:#f8fafc
+
+            subgraph Secure_Sandbox ["🛡️ Sentinel Sandbox (Container)"]
+                style Secure_Sandbox fill:#111827,stroke:#f59e0b,stroke-width:3px,color:#f8fafc
+
+                Agent["🤖 AI Agent Code"]
+                Hooks["🪝 Sentinel Hooks<br/>(src/core.py)"]
+
+                Agent -- "Function Call" --> Hooks
+
+                subgraph Kernel_Enforcement ["Kernel Layer"]
+                    style Kernel_Enforcement fill:#0b1220,stroke:#64748b,stroke-width:2px,color:#f8fafc
+                    RO["🚫 Read-Only FS"]
+                    Seccomp["👮 Seccomp Profile<br/>(syscall filter)"]
+                    Caps["🔒 Cap Drop: ALL"]
+                end
+            end
+
+            Proxy["🚦 Sidecar Proxy<br/>(Squid)"]
+        end
+
+        Judge["🧠 AI Judge<br/>(Ollama/LlamaGuard)"]
+        Policy["📜 sentinel.yaml<br/>(Policy Config)"]
+
+        %% Data Flows
+        Hooks -- "2. Check" --> Policy
+        Hooks -- "3. Verify Intent" --> Judge
+        Hooks -- "4. Network Req" --> Proxy
+
+        Proxy -- "5. Allowed Domain?" --> Internet((Internet))
+        Proxy -- "Blocked" --> Drop["❌ Drop"]
+    end
+
+    %% Node styles (dark-theme friendly)
+    style User fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style CLI fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style Agent fill:#0b1220,stroke:#a78bfa,stroke-width:2px,color:#f8fafc
+    style Hooks fill:#0b1220,stroke:#22c55e,stroke-width:2px,color:#f8fafc
+    style Proxy fill:#0b1220,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
+    style Judge fill:#0b1220,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Policy fill:#0b1220,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Internet fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style Drop fill:#450a0a,stroke:#ef4444,stroke-width:2px,color:#f8fafc
+    style RO fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style Seccomp fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style Caps fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+
+    linkStyle default stroke:#94a3b8,stroke-width:2px;
+
+```
+
 ## Documentation Map
 
 - Start here: [docs/README.md](docs/README.md)
@@ -77,9 +147,6 @@ Blocked actions can default to user-approval prompts when no custom handler is s
 - OpenClaw integration: [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
 - Integrity/performance benchmark: [scripts/benchmark_integrity.py](scripts/benchmark_integrity.py)
 
-## Approval UI Preview
-
-![Sentinel approval popup](docs/images/approval-popup.png)
 
 ## Development
 
