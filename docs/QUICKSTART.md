@@ -31,7 +31,7 @@ docker compose --profile strict run --rm sentinel-strict
 docker compose --profile standard run --rm sentinel-standard
 ```
 
-- Proxied (networked with sidecar egress control, gold standard):
+- Proxied (networked with sidecar egress control, Gold standard (topology-enforced proxy routing)):
 
 ```bash
 docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
@@ -45,7 +45,7 @@ This is stronger than bridge-mode proxy env injection because topology enforces 
 sentinel-isolate --build-if-missing -- python your_agent.py
 ```
 
-If you need network with `sentinel-isolate`, understand this is lower-assurance than proxied compose:
+If you need network with `sentinel-isolate`, understand this is Lower-assurance bridge + proxy env compared to proxied compose:
 
 ```bash
 sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py

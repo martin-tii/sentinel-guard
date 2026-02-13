@@ -7,7 +7,9 @@ Use this when you want OpenClaw sandbox hardening + Sentinel proxy topology with
 - ✅ Recommended: `python scripts/install_openclaw_with_sentinel.py`
 - 🛠 Advanced: manual `openclaw config set --json ...` sandbox commands
 - ⚠ Not included: Sentinel Python in-process hooks (`activate_sentinel()`) for OpenClaw Gateway runtime
-- ⚠ OpenClaw `2026.2.12`: `before_tool_call` plugin interception is **not guaranteed across all agent execution paths**. Treat it as future-ready/experimental, not sole enforcement.
+- ⚠ OpenClaw `2026.2.12`: `before_tool_call` plugin interception is not guaranteed across all agent execution paths.
+
+For guaranteed enforcement, rely on sandbox hardening + approvals/allowlists; plugin interception is defense-in-depth.
 
 ## Scope
 
@@ -141,87 +143,11 @@ When Sentinel hardening is enabled, the helper configures:
 - Sandbox lifecycle refresh:
   - `openclaw sandbox recreate --all`
 
-## Pre-Exec Interception Behavior
-
-The Sentinel pre-exec plugin is the primary enforcement path:
-- It runs before tool execution (`before_tool_call`).
-- Default risky tools:
-  - `exec`, `process`, `write`, `edit`, `apply_patch`
-- It asks via popup and terminal (if available); first response wins.
-- `Block` denies the call before execution.
-- Popup and terminal prompts run in parallel; the first response wins.
-- Timeout/fallback behavior is secure-by-default (`block`).
-
-Current OpenClaw reality check (`2026.2.12`):
-- The plugin is installed and loaded, but interception behavior can vary depending on runtime path/fallback mode.
-- Do not rely on `before_tool_call` alone for hard guarantees yet.
-- Because of this, keep strict allowlist + approvals as the primary hard controls.
-- The same caveat applies to injection-guard callback paths (`before_agent_start`/`before_tool_call`) in this version.
-
-Environment overrides:
-
-```bash
-export SENTINEL_OPENCLAW_INTERCEPT_TOOLS="exec,process,write,edit,apply_patch"
-export SENTINEL_OPENCLAW_INTERCEPT_TIMEOUT_SECONDS="120"
-export SENTINEL_OPENCLAW_INTERCEPT_FALLBACK="block"
-```
-
-## Popup Guard Fallback
-
-The log-based popup guard remains installed as fallback defense-in-depth.
-
-If you do not see OpenClaw UI approvals in the browser due token mismatch/reconnect issues, this popup guard still provides a visible local alert path.
-
-## Popup Catalog (What Is Highlighted/Shown)
-
-1. `Sentinel OpenClaw Guard`
-- Trigger: risky tool activity (`exec`, `process`, `write`, `edit`, `apply_patch`).
-- UI choices: `Block Tool` or `Ignore`.
-- Effect: `Block Tool` removes the detected tool from allowlist (future runs).
-
-2. `Sentinel Injection Alert`
-- Trigger: prompt injection / jailbreak detection in `sentinel-injection-guard`.
-- UI: warning popup (or terminal alert fallback).
-- Effect: strict tool profile is enforced immediately.
-
-3. `[Sentinel Alert] ...` terminal/log alert
-- Trigger: same events when desktop popup cannot be shown.
-- Effect: operator-visible alert in terminal/gateway logs.
-
-## Alternatives to `before_tool_call` Today
-
-When you need enforcement now (without relying on experimental pre-exec hooks), use:
-- Tool allowlist hardening (`tools.sandbox.tools.allow`) to remove risky writers by default.
-- OpenClaw approvals baseline (`ask=always`, `askFallback=deny`) for explicit gate behavior.
-- Sentinel popup guard for visible alerts and fast operator response.
-- Sentinel injection guard strict mode (`sentinel-injection-guard`) to auto-downgrade tool access when prompt injection/jailbreak is detected.
-
-Strict no-write profile example (recommended for high assurance):
-
-```bash
-openclaw config set --json tools.sandbox.tools.allow '[
-  "read",
-  "image",
-  "sessions_list",
-  "sessions_history",
-  "sessions_send",
-  "sessions_spawn",
-  "session_status"
-]'
-openclaw sandbox recreate --all
-```
-
-If a write slips through anyway:
-- Delete newly created files immediately in the OpenClaw workspace.
-- Restore modified files from your VCS/backup baseline.
-- Recreate sandboxes to clear transient state.
-- `sentinel-injection-guard` automates deletion for `write` outputs in flagged sessions.
-
 ## Advanced / Manual Override
 
 Use this if you need explicit control instead of the transparent installer.
 
-1) Start Sentinel proxy topology (gold standard for networked sandboxes):
+1) Start Sentinel proxy topology (Gold standard (topology-enforced proxy routing)):
 
 ```bash
 cd sentinel-guard
@@ -326,3 +252,81 @@ Pass when:
 - Direct egress from sandbox fails on internal network topology.
 - Proxied egress succeeds only for domains allowlisted in:
   - `sentinel-guard/proxy/allowed-domains.txt`
+
+## Appendix: Plugin and Popup Enforcement Details
+
+### Pre-Exec Interception Behavior
+
+The Sentinel pre-exec plugin is the primary enforcement path:
+- It runs before tool execution (`before_tool_call`).
+- Default risky tools:
+  - `exec`, `process`, `write`, `edit`, `apply_patch`
+- It asks via popup and terminal (if available); first response wins.
+- `Block` denies the call before execution.
+- Popup and terminal prompts run in parallel; the first response wins.
+- Timeout/fallback behavior is secure-by-default (`block`).
+
+Current OpenClaw reality check (`2026.2.12`):
+- The plugin is installed and loaded, but interception behavior can vary depending on runtime path/fallback mode.
+- Do not rely on `before_tool_call` alone for hard guarantees yet.
+- Keep strict allowlist + approvals as primary hard controls.
+- The same caveat applies to injection-guard callback paths (`before_agent_start`/`before_tool_call`) in this version.
+
+Environment overrides:
+
+```bash
+export SENTINEL_OPENCLAW_INTERCEPT_TOOLS="exec,process,write,edit,apply_patch"
+export SENTINEL_OPENCLAW_INTERCEPT_TIMEOUT_SECONDS="120"
+export SENTINEL_OPENCLAW_INTERCEPT_FALLBACK="block"
+```
+
+### Popup Guard Fallback
+
+The log-based popup guard remains installed as fallback defense-in-depth.
+
+If you do not see OpenClaw UI approvals in the browser due token mismatch/reconnect issues, this popup guard still provides a visible local alert path.
+
+### Popup Catalog (What Is Highlighted/Shown)
+
+1. `Sentinel OpenClaw Guard`
+- Trigger: risky tool activity (`exec`, `process`, `write`, `edit`, `apply_patch`).
+- UI choices: `Block Tool` or `Ignore`.
+- Effect: `Block Tool` removes the detected tool from allowlist (future runs).
+
+2. `Sentinel Injection Alert`
+- Trigger: prompt injection / jailbreak detection in `sentinel-injection-guard`.
+- UI: warning popup (or terminal alert fallback).
+- Effect: strict tool profile is enforced immediately.
+
+3. `[Sentinel Alert] ...` terminal/log alert
+- Trigger: same events when desktop popup cannot be shown.
+- Effect: operator-visible alert in terminal/gateway logs.
+
+### Alternatives to `before_tool_call` Today
+
+When you need enforcement now (without relying on experimental pre-exec hooks), use:
+- Tool allowlist hardening (`tools.sandbox.tools.allow`) to remove risky writers by default.
+- OpenClaw approvals baseline (`ask=always`, `askFallback=deny`) for explicit gate behavior.
+- Sentinel popup guard for visible alerts and fast operator response.
+- Sentinel injection guard strict mode (`sentinel-injection-guard`) to auto-downgrade tool access when prompt injection/jailbreak is detected.
+
+Strict no-write profile example (recommended for high assurance):
+
+```bash
+openclaw config set --json tools.sandbox.tools.allow '[
+  "read",
+  "image",
+  "sessions_list",
+  "sessions_history",
+  "sessions_send",
+  "sessions_spawn",
+  "session_status"
+]'
+openclaw sandbox recreate --all
+```
+
+If a write slips through anyway:
+- Delete newly created files immediately in the OpenClaw workspace.
+- Restore modified files from your VCS/backup baseline.
+- Recreate sandboxes to clear transient state.
+- `sentinel-injection-guard` automates deletion for `write` outputs in flagged sessions.

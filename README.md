@@ -30,7 +30,7 @@ python "scripts/install_openclaw_with_sentinel.py"
 ```
 
 OpenClaw popup/alert behavior (what users see) is documented in:
-- [docs/README.md#popup-alerts-you-should-see](docs/README.md#popup-alerts-you-should-see)
+- [docs/README.md#approval-ui](docs/README.md#approval-ui)
 - [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
 
 If you are onboarding a new workload, start with seccomp complain mode, then tighten:
@@ -45,7 +45,7 @@ For networked workloads, use the Docker Compose proxied profile as the gold stan
 docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
 ```
 
-`sentinel-isolate --network bridge --enforce-proxy --proxy ...` is a lower-assurance option.
+`sentinel-isolate --network bridge --enforce-proxy --proxy ...` is a Lower-assurance bridge + proxy env option.
 It relies on proxy environment variables inside the container. A malicious payload with code execution
 can attempt direct egress if host/network topology does not block it.
 
@@ -69,7 +69,7 @@ Detection handling defaults to approval-required (`judge.injection_scan.on_detec
 
 ## Important Security Note
 
-Compatibility mode (`activate_sentinel()` in-process hooks) is guardrails for accidental/buggy behavior, not a hard containment boundary against determined malicious code.
+Compatibility mode (`activate_sentinel()` in-process hooks) is guardrails for accidental/buggy behavior. Compatibility mode is not hard containment against determined malicious code.
 
 Use `sentinel-isolate` for hard process/container boundaries.
 

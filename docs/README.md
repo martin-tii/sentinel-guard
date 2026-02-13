@@ -2,6 +2,12 @@
 
 Use this page as the documentation entry point.
 
+## Pick Your Path in 30 Seconds
+
+- Untrusted local/python agent: start with [Quickstart](./QUICKSTART.md).
+- Networked high-assurance isolation: use [Deployment Proxied Mode](../DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation).
+- OpenClaw hardening: use [OpenClaw Quickstart](./OPENCLAW_INTEGRATION.md#quickstart-recommended).
+
 ## Start Here
 
 - New user: [Quickstart](./QUICKSTART.md)
@@ -21,23 +27,21 @@ Use this page as the documentation entry point.
 
 ![Sentinel approval popup](./images/approval-popup.png)
 
-### Popup Alerts You Should See
+OpenClaw + Sentinel can surface two main alerts (`Sentinel OpenClaw Guard`, `Sentinel Injection Alert`) and a terminal fallback (`[Sentinel Alert] ...`) in headless environments.
+Full popup behavior and triggers are documented in [OpenClaw Integration](./OPENCLAW_INTEGRATION.md#appendix-plugin-and-popup-enforcement-details).
 
-Current OpenClaw + Sentinel integration can show these alerts:
+## Typical Paths
 
-1. `Sentinel OpenClaw Guard` (risky tool activity)
-- Trigger: risky tool activity (`exec`, `process`, `write`, `edit`, `apply_patch`).
-- Buttons: `Block Tool` / `Ignore` (or OS-equivalent labels).
-- Source: `scripts/openclaw_popup_guard.py` (log-reactive fallback path).
-
-2. `Sentinel Injection Alert` (prompt injection/jailbreak detected)
-- Trigger: injection/jailbreak detection by `sentinel-injection-guard`.
-- Action: strict tool mode enforced (read-only style allowlist), risky tools blocked.
-- Source: `openclaw-plugins/sentinel-injection-guard/index.js`.
-
-3. Terminal alert fallback (`[Sentinel Alert] ...`)
-- Trigger: same security events when UI popup cannot be shown (headless/no desktop UI).
-- Output: visible in terminal/gateway logs.
+- Safest default (no network):
+  - `sentinel-isolate --build-if-missing -- python your_agent.py`
+- Networked isolation, Gold standard (topology-enforced proxy routing):
+  - `docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied`
+- Networked isolated run, Lower-assurance bridge + proxy env:
+  - `sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py`
+- Compatibility mode (guardrails only):
+  - call `activate_sentinel()` early in your process.
+- OpenClaw CLI in Sentinel isolation:
+  - `sentinel-openclaw -- gateway --port 18789`
 
 ## How Sentinel Decides (Decision Flow)
 
@@ -88,7 +92,7 @@ flowchart TD
     NetPol -->|Allowed| Allow
     Heuristics -- Low --> Allow
     AIJudge -- Safe --> Allow
-    
+
     %% Approval Flow
     AIJudge -- Unsafe --> AskHuman
     AskHuman{👤 Human Approval}
@@ -113,22 +117,9 @@ flowchart TD
 
 - Integrity check gate: `policy_integrity.tamper_detection` (see `sentinel.yaml`)
 - Prompt-injection lane: `judge.prompt_guard.*` and `judge.injection_scan.*`
-- Network lane: `allowed_hosts` plus the proxied run mode (topology + sidecar) described in [../DEPLOYMENT.md](../DEPLOYMENT.md)
+- Network lane: `allowed_hosts` plus proxied mode in [Deployment](../DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation)
 - Command lane: `allowed_commands` and `blocked_command_bases`
 - Human escalation: `SENTINEL_APPROVAL_MODE` and custom approval handlers (see [Usage Modes](./USAGE_MODES.md#approval-handlers))
-
-## Typical Paths
-
-- Safest default (no network):
-  - `sentinel-isolate --build-if-missing -- python your_agent.py`
-- Networked isolation (gold standard):
-  - `docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied`
-- Networked isolated run (lower assurance):
-  - `sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py`
-- Compatibility mode (guardrails only):
-  - call `activate_sentinel()` early in your process.
-- OpenClaw CLI in Sentinel isolation:
-  - `sentinel-openclaw -- gateway --port 18789`
 
 ## Prompt Injection Defense
 

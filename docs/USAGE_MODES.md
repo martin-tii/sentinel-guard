@@ -2,6 +2,13 @@
 
 Sentinel Guard supports two modes with different trust boundaries.
 
+## When to Choose Each Mode
+
+| Mode | Use it when | Security boundary |
+| --- | --- | --- |
+| Isolation Mode | Running untrusted code or unknown third-party agents | Strongest boundary (container/process isolation) |
+| Compatibility Mode | Running trusted code and you need in-process guardrails | Guardrails only (not hard containment) |
+
 ## 1) Isolation Mode (Recommended for Untrusted Code)
 
 `sentinel-isolate` runs commands in a hardened Docker container.
@@ -9,6 +16,12 @@ Sentinel Guard supports two modes with different trust boundaries.
 ```bash
 sentinel-isolate --build-if-missing -- python your_agent.py
 ```
+
+For networked high-assurance runs, use Gold standard (topology-enforced proxy routing):
+- [Deployment: Proxied Mode](../DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation)
+
+For OpenClaw-specific hardening:
+- [OpenClaw Integration](./OPENCLAW_INTEGRATION.md)
 
 ### Key flags
 
@@ -32,7 +45,7 @@ sentinel-isolate \
 
 ### Networked isolation levels
 
-Gold standard for networked isolation:
+Gold standard (topology-enforced proxy routing):
 
 ```bash
 docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
@@ -41,14 +54,14 @@ docker compose --profile proxied up --build --abort-on-container-exit sentinel-p
 - Mechanism: Docker network topology + proxy sidecar.
 - Security effect: direct egress is blocked by topology, not just app-level env vars.
 
-Lower-assurance alternative:
+Lower-assurance bridge + proxy env:
 
 ```bash
 sentinel-isolate --network bridge --enforce-proxy --proxy http://sentinel-proxy:3128 --build-if-missing -- python your_agent.py
 ```
 
 - Mechanism: proxy environment variables inside container.
-- Security effect: a malicious payload can try to unset/ignore proxy vars and attempt direct egress if topology/firewall allows it.
+- Security effect: malicious payloads can attempt to unset/ignore proxy vars and try direct egress if topology/firewall allows it.
 
 ### Seccomp onboarding pattern
 
@@ -72,7 +85,7 @@ activate_sentinel()
 deactivate_sentinel()
 ```
 
-Important: compatibility mode is not a hard containment boundary against determined malicious code in the same interpreter.
+Important: Compatibility mode is not hard containment against determined malicious code in the same interpreter.
 
 ### Automatic Prompt-Injection Scan (Compatibility Mode)
 

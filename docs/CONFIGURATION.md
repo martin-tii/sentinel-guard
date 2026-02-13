@@ -70,6 +70,31 @@ network_failsafe:
   allowed_ips: []
 ```
 
+## Common Policy Profiles
+
+Use these as quick starting points, then expand with the full policy schema above.
+
+### 1) Strict Local / No Network
+
+- `allowed_commands`: minimal set only
+- `allowed_hosts`: empty
+- `network_failsafe.socket_connect: true`
+- Run with `--network none` (or strict compose profile)
+
+### 2) Networked Proxied (Gold standard (topology-enforced proxy routing))
+
+- `allowed_hosts`: explicit allowlist only
+- `network_failsafe.socket_connect: true`
+- `network_failsafe.allow_private_network: false`
+- Run via proxied compose topology (sidecar + internal network), not only bridge proxy env vars
+
+### 3) Compatibility Mode with Approval Defaults
+
+- `judge.injection_scan.enabled: true`
+- `judge.injection_scan.on_detection: approval`
+- `prompt_guard.enabled: true`
+- `SENTINEL_APPROVAL_MODE=auto` (or explicit `tkinter`/`console`/`reject`)
+
 ## Environment Variables
 
 ### Safety Controls
