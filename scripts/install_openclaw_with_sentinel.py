@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -12,6 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Optional, Sequence
+from urllib.parse import urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,7 @@ INJECTION_GUARD_PLUGIN_ID = "sentinel-injection-guard"
 INJECTION_GUARD_PLUGIN_SRC = REPO_ROOT / "openclaw-plugins" / INJECTION_GUARD_PLUGIN_ID
 DEFAULT_INSTALL_URL = "https://openclaw.ai/install.sh"
 INSTALL_CLI_URL = "https://openclaw.ai/install-cli.sh"
+TRUSTED_INSTALL_HOSTS = {"openclaw.ai"}
 
 
 def _run(
@@ -80,6 +83,23 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help=f"OpenClaw installer script URL (default: {DEFAULT_INSTALL_URL}).",
     )
     parser.add_argument(
+        "--openclaw-install-sha256",
+        default=os.environ.get("SENTINEL_OPENCLAW_INSTALL_SHA256", ""),
+        help=(
+            "Optional expected SHA-256 for the --openclaw-install-url script. "
+            "When set, installer execution is blocked if digest mismatch occurs."
+        ),
+    )
+    parser.add_argument(
+        "--allow-untrusted-installer-url",
+        action="store_true",
+        default=str(os.environ.get("SENTINEL_ALLOW_UNTRUSTED_INSTALLER_URL", "")).strip().lower() in ("1", "true", "yes", "on"),
+        help=(
+            "Allow installer URLs outside trusted hosts. "
+            "Use only in controlled environments."
+        ),
+    )
+    parser.add_argument(
         "--sentinel-network",
         default="",
         help=(
@@ -97,7 +117,39 @@ def _is_openclaw_installed() -> bool:
     return rc == 0
 
 
-def _run_remote_installer(install_url: str, *, installer_args: Optional[list[str]] = None):
+def _validate_installer_url(install_url: str, *, allow_untrusted_urls: bool):
+    parsed = urlparse(str(install_url).strip())
+    if parsed.scheme.lower() != "https":
+        raise RuntimeError(f"Installer URL must use HTTPS: {install_url}")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise RuntimeError(f"Installer URL must include a valid hostname: {install_url}")
+    if not allow_untrusted_urls and host not in TRUSTED_INSTALL_HOSTS:
+        allowed = ", ".join(sorted(TRUSTED_INSTALL_HOSTS))
+        raise RuntimeError(
+            f"Installer URL host '{host}' is not trusted. Allowed hosts: {allowed}. "
+            "Use --allow-untrusted-installer-url to override."
+        )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _run_remote_installer(
+    install_url: str,
+    *,
+    installer_args: Optional[list[str]] = None,
+    expected_sha256: str = "",
+    allow_untrusted_urls: bool = False,
+):
+    _validate_installer_url(install_url, allow_untrusted_urls=allow_untrusted_urls)
     with tempfile.NamedTemporaryFile(prefix="openclaw-install-", suffix=".sh", delete=False) as tmp:
         script_path = Path(tmp.name)
     try:
@@ -119,6 +171,14 @@ def _run_remote_installer(install_url: str, *, installer_args: Optional[list[str
                 str(script_path),
             ]
         )
+        expected = str(expected_sha256 or "").strip().lower()
+        if expected:
+            actual = _sha256_file(script_path).lower()
+            if actual != expected:
+                raise RuntimeError(
+                    "Installer SHA-256 mismatch. "
+                    f"expected={expected} actual={actual}"
+                )
         cmd = ["bash", str(script_path)]
         if installer_args:
             cmd.extend(["-s", "--"])
@@ -140,16 +200,27 @@ def _install_openclaw_via_npm(*, run_onboard: bool):
         _run(["openclaw", "onboard", "--install-daemon"])
 
 
-def _install_openclaw(install_url: str, *, run_onboard: bool):
+def _install_openclaw(
+    install_url: str,
+    *,
+    run_onboard: bool,
+    installer_sha256: str = "",
+    allow_untrusted_urls: bool = False,
+):
     errors: list[str] = []
     attempts = [
-        ("installer", install_url, []),
-        ("installer-cli", INSTALL_CLI_URL, ["--onboard"] if run_onboard else ["--no-onboard"]),
+        ("installer", install_url, [], str(installer_sha256 or "").strip()),
+        ("installer-cli", INSTALL_CLI_URL, ["--onboard"] if run_onboard else ["--no-onboard"], ""),
     ]
 
-    for label, url, extra_args in attempts:
+    for label, url, extra_args, expected_sha256 in attempts:
         try:
-            _run_remote_installer(url, installer_args=extra_args if label == "installer-cli" else None)
+            _run_remote_installer(
+                url,
+                installer_args=extra_args if label == "installer-cli" else None,
+                expected_sha256=expected_sha256,
+                allow_untrusted_urls=allow_untrusted_urls,
+            )
             return
         except RuntimeError as exc:
             errors.append(f"{label} ({url}): {exc}")
@@ -289,6 +360,7 @@ def _install_injection_guard_plugin() -> Path:
             "ollamaEndpoint": "http://localhost:11434/api/generate",
             "promptGuardModel": "prompt-guard",
             "llamaGuardModel": "llama-guard3",
+            "failMode": "closed",
             "riskyTools": ["exec", "process", "write", "edit", "apply_patch"],
             "strictTools": [
                 "read",
@@ -404,7 +476,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
                 return 1
             print(f"OpenClaw not found. Installing from: {args.openclaw_install_url}")
-            _install_openclaw(args.openclaw_install_url, run_onboard=not args.non_interactive)
+            _install_openclaw(
+                args.openclaw_install_url,
+                run_onboard=not args.non_interactive,
+                installer_sha256=args.openclaw_install_sha256,
+                allow_untrusted_urls=args.allow_untrusted_installer_url,
+            )
         else:
             print("OpenClaw detected in PATH. Skipping install.")
 

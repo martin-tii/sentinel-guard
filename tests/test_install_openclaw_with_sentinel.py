@@ -1,6 +1,8 @@
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 
@@ -9,6 +11,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from scripts.install_openclaw_with_sentinel import (
     SENTINEL_HELPER,
     _install_openclaw,
+    _run_remote_installer,
+    _validate_installer_url,
     build_default_exec_approvals,
     _run_sentinel_helper,
     main,
@@ -45,7 +49,12 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         rc = main([])
 
         self.assertEqual(rc, 0)
-        install_mock.assert_called_once_with("https://openclaw.ai/install.sh", run_onboard=True)
+        install_mock.assert_called_once_with(
+            "https://openclaw.ai/install.sh",
+            run_onboard=True,
+            installer_sha256="",
+            allow_untrusted_urls=False,
+        )
         helper_mock.assert_called_once_with("")
         approvals_mock.assert_called_once()
         preexec_plugin_mock.assert_called_once()
@@ -327,10 +336,51 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
     def test_install_openclaw_uses_npm_after_script_failures(self, installer_mock, npm_mock):
         installer_mock.side_effect = [RuntimeError("primary down"), RuntimeError("fallback down")]
 
-        _install_openclaw("https://openclaw.ai/install.sh", run_onboard=True)
+        _install_openclaw(
+            "https://openclaw.ai/install.sh",
+            run_onboard=True,
+            installer_sha256="",
+            allow_untrusted_urls=False,
+        )
 
         self.assertEqual(installer_mock.call_count, 2)
         npm_mock.assert_called_once_with(run_onboard=True)
+
+    def test_validate_installer_url_allows_trusted_https_host(self):
+        _validate_installer_url("https://openclaw.ai/install.sh", allow_untrusted_urls=False)
+
+    def test_validate_installer_url_rejects_non_https(self):
+        with self.assertRaises(RuntimeError):
+            _validate_installer_url("http://openclaw.ai/install.sh", allow_untrusted_urls=False)
+
+    def test_validate_installer_url_rejects_untrusted_host_by_default(self):
+        with self.assertRaises(RuntimeError):
+            _validate_installer_url("https://example.com/install.sh", allow_untrusted_urls=False)
+
+    def test_validate_installer_url_allows_untrusted_host_with_override(self):
+        _validate_installer_url("https://example.com/install.sh", allow_untrusted_urls=True)
+
+    def test_run_remote_installer_rejects_sha_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = Path(tmpdir) / "install.sh"
+            payload.write_text("#!/usr/bin/env bash\necho ok\n", encoding="utf-8")
+
+            def fake_run(cmd, **kwargs):
+                # Simulate curl download by copying the local payload to requested output path.
+                if cmd and cmd[0] == "curl":
+                    out_index = cmd.index("-o") + 1
+                    out_path = Path(cmd[out_index])
+                    out_path.write_text(payload.read_text(encoding="utf-8"), encoding="utf-8")
+                    return 0
+                return 0
+
+            with patch("scripts.install_openclaw_with_sentinel._run", side_effect=fake_run):
+                with self.assertRaises(RuntimeError):
+                    _run_remote_installer(
+                        "https://openclaw.ai/install.sh",
+                        expected_sha256="0" * 64,
+                        allow_untrusted_urls=False,
+                    )
 
     def test_default_exec_approvals_baseline(self):
         baseline = build_default_exec_approvals()

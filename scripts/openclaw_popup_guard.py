@@ -2,21 +2,20 @@
 
 from __future__ import annotations
 
-import re
 import os
-import sys
+import re
 import shutil
 import subprocess
-import time
-import threading
 import queue
+import sys
+import threading
+import time
 from collections import deque
 from typing import Deque
 
 
-EXEC_START_RE = re.compile(r"embedded run tool start: .*tool=exec(?: .*toolCallId=(\S+))?")
-TOOL_START_RE = re.compile(r"embedded run tool start: .*tool=(\w+)(?: .*toolCallId=(\S+))?")
-TOOL_FAIL_RE = re.compile(r"\[tools\] (\w+) failed:")
+TOOL_START_RE = re.compile(r"embedded run tool start: .*tool=([^\s]+)(?: .*toolCallId=([^\s]+))?")
+TOOL_FAIL_RE = re.compile(r"\[tools\] ([^\s]+) failed:")
 DEFAULT_RISKY_TOOLS = ("exec", "process", "write", "edit", "apply_patch")
 
 
@@ -48,19 +47,19 @@ def _run(cmd: list[str], *, check: bool = True):
     return result
 
 
-def _get_allow_tools() -> list[str]:
-    result = _run(["openclaw", "config", "get", "tools.sandbox.tools.allow", "--json"], check=False)
+def _get_allow_tools(openclaw_bin: str) -> list[str] | None:
+    result = _run([openclaw_bin, "config", "get", "tools.sandbox.tools.allow", "--json"], check=False)
     if result.returncode != 0 or not result.stdout.strip():
-        return []
+        return None
     # Output is JSON array text.
     import json
 
     try:
         parsed = json.loads(result.stdout)
     except Exception:
-        return []
+        return None
     if not isinstance(parsed, list):
-        return []
+        return None
     return [str(x) for x in parsed]
 
 
@@ -79,77 +78,31 @@ def _default_allow_tools() -> list[str]:
     ]
 
 
-def _block_tool_globally(tool_name: str):
+def _block_tool_globally(tool_name: str, openclaw_bin: str) -> bool:
     tool_name = (tool_name or "").strip().lower()
     if not tool_name:
-        return
-    tools = _get_allow_tools()
+        return False
+    tools = _get_allow_tools(openclaw_bin)
+    if tools is None:
+        # Fail closed on state-read failure to avoid broadening policy.
+        return False
     filtered = [t for t in tools if t != tool_name]
     if tools and filtered == tools:
-        return
+        return True
     if not tools:
-        # Conservative fallback if key is missing.
-        filtered = [t for t in _default_allow_tools() if t != tool_name]
+        # Empty configured allowlist: keep it empty rather than broadening defaults.
+        return True
     import json
 
     payload = json.dumps(filtered, separators=(",", ":"))
-    _run(["openclaw", "config", "set", "--json", "tools.sandbox.tools.allow", payload], check=False)
-    _run(["openclaw", "sandbox", "recreate", "--all"], check=False)
-
-
-def _popup_exec_alert(event_text: str):
-    msg = (
-        "Sentinel Alert: OpenClaw exec tool activity detected.\n\n"
-        "Choose 'Block Exec' to remove exec from sandbox allowlist globally."
+    set_result = _run(
+        [openclaw_bin, "config", "set", "--json", "tools.sandbox.tools.allow", payload],
+        check=False,
     )
-    system = os.uname().sysname.lower() if hasattr(os, "uname") else os.name
-
-    # macOS: AppleScript modal dialog.
-    if system == "darwin":
-        script = (
-            'display dialog "{}" with title "Sentinel OpenClaw Guard" '
-            'buttons {{"Ignore","Block Exec"}} default button "Block Exec"'
-        ).format(msg.replace('"', '\\"'))
-        result = _run(["osascript", "-e", script], check=False)
-        output = (result.stdout or "") + (result.stderr or "")
-        if "Block Exec" in output:
-            _block_exec_globally()
-        return
-
-    # Linux: zenity if available.
-    if system == "linux":
-        if shutil.which("zenity"):
-            result = _run(
-                [
-                    "zenity",
-                    "--question",
-                    "--title=Sentinel OpenClaw Guard",
-                    f"--text={msg}",
-                    "--ok-label=Block Exec",
-                    "--cancel-label=Ignore",
-                ],
-                check=False,
-            )
-            if result.returncode == 0:
-                _block_exec_globally()
-        return
-
-    # Windows: PowerShell MessageBox (best-effort).
-    if os.name == "nt":
-        escaped_msg = msg.replace("'", "''")
-        ps = (
-            "[void][Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); "
-            "$r=[System.Windows.Forms.MessageBox]::Show("
-            f"'{escaped_msg}',"
-            "'Sentinel OpenClaw Guard',"
-            "[System.Windows.Forms.MessageBoxButtons]::YesNo,"
-            "[System.Windows.Forms.MessageBoxIcon]::Warning); "
-            "if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 } else { exit 1 }"
-        )
-        result = _run(["powershell", "-NoProfile", "-Command", ps], check=False)
-        if result.returncode == 0:
-            _block_tool_globally("exec")
-        return
+    if set_result.returncode != 0:
+        return False
+    recreate_result = _run([openclaw_bin, "sandbox", "recreate", "--all"], check=False)
+    return recreate_result.returncode == 0
 
 
 def _popup_decision(tool_name: str) -> str | None:
@@ -254,10 +207,17 @@ def _alert_and_decide(tool_name: str) -> str:
         return "block"
 
 
-def _handle_tool_alert(tool_name: str):
+def _handle_tool_alert(tool_name: str, openclaw_bin: str):
     decision = _alert_and_decide(tool_name)
     if decision == "block":
-        _block_tool_globally(tool_name)
+        blocked = _block_tool_globally(tool_name, openclaw_bin)
+        if not blocked:
+            print(
+                f"[Sentinel OpenClaw Guard] failed to block tool '{tool_name}' "
+                "(could not read or update allowlist).",
+                file=sys.stderr,
+                flush=True,
+            )
 
 
 def main() -> int:
@@ -315,7 +275,7 @@ def main() -> int:
             if now - last_popup_at < 8:
                 continue
             last_popup_at = now
-            _handle_tool_alert(tool_name)
+            _handle_tool_alert(tool_name, openclaw_bin)
     return 0
 
 

@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import {
   containsInjectionHeuristics,
   extractCandidateText,
+  modelUnavailableVerdict,
   normalizeToolList,
   parseModelUnsafe,
+  resolveFailMode,
   safeResolveWorkspacePath,
 } from "../index.js";
 
@@ -37,4 +39,17 @@ test("parseModelUnsafe marks unsafe responses and preserves reason", () => {
   const parsed = parseModelUnsafe("UNSAFE: jailbreak detected");
   assert.equal(parsed.unsafe, true);
   assert.match(parsed.reason, /unsafe/);
+});
+
+test("resolveFailMode defaults to closed and accepts explicit open", () => {
+  assert.equal(resolveFailMode({}), "closed");
+  assert.equal(resolveFailMode({ failMode: "open" }), "open");
+  assert.equal(resolveFailMode({ failMode: "invalid" }), "closed");
+});
+
+test("modelUnavailableVerdict enforces selected fail mode", () => {
+  const closed = modelUnavailableVerdict("closed");
+  assert.equal(closed.safe, false);
+  const open = modelUnavailableVerdict("open");
+  assert.equal(open.safe, true);
 });

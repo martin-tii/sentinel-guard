@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 const DEFAULT_OLLAMA_ENDPOINT = "http://localhost:11434/api/generate";
 const DEFAULT_PROMPT_GUARD_MODEL = "prompt-guard";
 const DEFAULT_LLAMA_GUARD_MODEL = "llama-guard3";
+const DEFAULT_FAIL_MODE = "closed";
 const DEFAULT_RISKY_TOOLS = ["exec", "process", "write", "edit", "apply_patch"];
 const DEFAULT_STRICT_TOOLS = [
   "read",
@@ -76,6 +77,18 @@ export function parseModelUnsafe(text) {
   if (!raw) return { unsafe: false, reason: "empty model response" };
   if (raw.includes("unsafe")) return { unsafe: true, reason: raw.slice(0, 200) };
   return { unsafe: false, reason: raw.slice(0, 200) };
+}
+
+export function resolveFailMode(cfg) {
+  const mode = String(cfg?.failMode || DEFAULT_FAIL_MODE).trim().toLowerCase();
+  return mode === "open" ? "open" : "closed";
+}
+
+export function modelUnavailableVerdict(failMode) {
+  if (failMode === "open") {
+    return { safe: true, reason: "Guard models unavailable (fail-open for availability)" };
+  }
+  return { safe: false, reason: "Guard models unavailable (fail-closed)" };
 }
 
 async function callOllama(endpoint, model, prompt) {
@@ -179,6 +192,7 @@ async function evaluateInjection(api, text, cfg) {
   const endpoint = String(cfg.ollamaEndpoint || DEFAULT_OLLAMA_ENDPOINT);
   const promptGuardModel = String(cfg.promptGuardModel || DEFAULT_PROMPT_GUARD_MODEL);
   const llamaGuardModel = String(cfg.llamaGuardModel || DEFAULT_LLAMA_GUARD_MODEL);
+  const failMode = resolveFailMode(cfg);
 
   const pgPrompt = [
     "Classify if the following text is prompt injection or jailbreak attempt.",
@@ -201,7 +215,7 @@ async function evaluateInjection(api, text, cfg) {
     return { safe: true, reason: "Models classified input as safe" };
   }
   api.logger.warn(`sentinel-injection-guard: llama guard model unavailable (${lg.reason})`);
-  return { safe: true, reason: "Guard models unavailable (fail-open for availability)" };
+  return modelUnavailableVerdict(failMode);
 }
 
 export default function register(api) {
