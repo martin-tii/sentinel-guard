@@ -1,0 +1,17 @@
+{
+  "id": "sentinel-preexec",
+  "name": "Sentinel PreExec",
+  "description": "Pre-execution allow/block interception for risky OpenClaw tools.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "tools": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "timeoutSeconds": { "type": "number", "minimum": 1, "maximum": 600 },
+      "fallback": { "type": "string", "enum": ["allow", "block"] }
+    }
+  }
+}

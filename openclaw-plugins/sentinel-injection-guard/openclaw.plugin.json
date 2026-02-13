@@ -1,0 +1,23 @@
+{
+  "id": "sentinel-injection-guard",
+  "name": "Sentinel Injection Guard",
+  "description": "Prompt-injection and jailbreak detection using Llama Prompt Guard + Llama Guard, with strict-mode enforcement.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "ollamaEndpoint": { "type": "string" },
+      "promptGuardModel": { "type": "string" },
+      "llamaGuardModel": { "type": "string" },
+      "strictTools": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "riskyTools": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

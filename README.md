@@ -29,6 +29,10 @@ For a transparent OpenClaw install/onboard flow with one extra Sentinel prompt, 
 python "scripts/install_openclaw_with_sentinel.py"
 ```
 
+OpenClaw popup/alert behavior (what users see) is documented in:
+- [docs/README.md#popup-alerts-you-should-see](docs/README.md#popup-alerts-you-should-see)
+- [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
+
 If you are onboarding a new workload, start with seccomp complain mode, then tighten:
 
 ```bash

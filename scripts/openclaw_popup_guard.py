@@ -15,7 +15,16 @@ from typing import Deque
 
 
 EXEC_START_RE = re.compile(r"embedded run tool start: .*tool=exec(?: .*toolCallId=(\S+))?")
-EXEC_FAIL_RE = re.compile(r"\[tools\] exec failed:")
+TOOL_START_RE = re.compile(r"embedded run tool start: .*tool=(\w+)(?: .*toolCallId=(\S+))?")
+TOOL_FAIL_RE = re.compile(r"\[tools\] (\w+) failed:")
+DEFAULT_RISKY_TOOLS = ("exec", "process", "write", "edit", "apply_patch")
+
+
+def _risky_tools() -> set[str]:
+    raw = os.environ.get("SENTINEL_OPENCLAW_POPUP_TOOLS", "")
+    if not raw.strip():
+        return set(DEFAULT_RISKY_TOOLS)
+    return {p.strip().lower() for p in raw.split(",") if p.strip()}
 
 
 def _find_openclaw_bin() -> str:
@@ -55,25 +64,32 @@ def _get_allow_tools() -> list[str]:
     return [str(x) for x in parsed]
 
 
-def _block_exec_globally():
+def _default_allow_tools() -> list[str]:
+    return [
+        "read",
+        "write",
+        "edit",
+        "apply_patch",
+        "image",
+        "sessions_list",
+        "sessions_history",
+        "sessions_send",
+        "sessions_spawn",
+        "session_status",
+    ]
+
+
+def _block_tool_globally(tool_name: str):
+    tool_name = (tool_name or "").strip().lower()
+    if not tool_name:
+        return
     tools = _get_allow_tools()
-    filtered = [t for t in tools if t != "exec"]
+    filtered = [t for t in tools if t != tool_name]
     if tools and filtered == tools:
         return
     if not tools:
         # Conservative fallback if key is missing.
-        filtered = [
-            "read",
-            "write",
-            "edit",
-            "apply_patch",
-            "image",
-            "sessions_list",
-            "sessions_history",
-            "sessions_send",
-            "sessions_spawn",
-            "session_status",
-        ]
+        filtered = [t for t in _default_allow_tools() if t != tool_name]
     import json
 
     payload = json.dumps(filtered, separators=(",", ":"))
@@ -132,11 +148,11 @@ def _popup_exec_alert(event_text: str):
         )
         result = _run(["powershell", "-NoProfile", "-Command", ps], check=False)
         if result.returncode == 0:
-            _block_exec_globally()
+            _block_tool_globally("exec")
         return
 
 
-def _popup_decision() -> str | None:
+def _popup_decision(tool_name: str) -> str | None:
     """
     Returns:
       - "block" when user chooses blocking action
@@ -144,19 +160,19 @@ def _popup_decision() -> str | None:
       - None when popup channel is unavailable
     """
     msg = (
-        "Sentinel Alert: OpenClaw exec tool activity detected.\n\n"
-        "Block Exec removes exec from sandbox allowlist globally."
+        f"Sentinel Alert: OpenClaw risky tool activity detected ({tool_name}).\n\n"
+        f"Block {tool_name} removes it from sandbox allowlist globally."
     )
     system = os.uname().sysname.lower() if hasattr(os, "uname") else os.name
 
     if system == "darwin":
         script = (
             'display dialog "{}" with title "Sentinel OpenClaw Guard" '
-            'buttons {{"Ignore","Block Exec"}} default button "Block Exec"'
+            'buttons {{"Ignore","Block Tool"}} default button "Block Tool"'
         ).format(msg.replace('"', '\\"'))
         result = _run(["osascript", "-e", script], check=False)
         output = (result.stdout or "") + (result.stderr or "")
-        return "block" if "Block Exec" in output else "ignore"
+        return "block" if "Block Tool" in output else "ignore"
 
     if system == "linux":
         if not shutil.which("zenity"):
@@ -167,7 +183,7 @@ def _popup_decision() -> str | None:
                 "--question",
                 "--title=Sentinel OpenClaw Guard",
                 f"--text={msg}",
-                "--ok-label=Block Exec",
+                "--ok-label=Block Tool",
                 "--cancel-label=Ignore",
             ],
             check=False,
@@ -190,14 +206,14 @@ def _popup_decision() -> str | None:
     return None
 
 
-def _terminal_decision() -> str | None:
+def _terminal_decision(tool_name: str) -> str | None:
     # Terminal prompt only makes sense for interactive invocations.
     if not sys.stdin or not sys.stdin.isatty():
         return None
     try:
         print(
-            "\n[Sentinel OpenClaw Guard] exec detected.\n"
-            "Type 'block' to disable exec globally, or 'ignore' to continue.",
+            f"\n[Sentinel OpenClaw Guard] risky tool detected: {tool_name}\n"
+            f"Type 'block' to disable '{tool_name}' globally, or 'ignore' to continue.",
             flush=True,
         )
         raw = input("> ").strip().lower()
@@ -208,7 +224,7 @@ def _terminal_decision() -> str | None:
     return "ignore"
 
 
-def _alert_and_decide() -> str:
+def _alert_and_decide(tool_name: str) -> str:
     """
     Run popup and terminal prompts in parallel; first responder wins.
     Returns "block" or "ignore".
@@ -216,12 +232,12 @@ def _alert_and_decide() -> str:
     decisions: "queue.Queue[str]" = queue.Queue()
 
     def run_popup():
-        decision = _popup_decision()
+        decision = _popup_decision(tool_name)
         if decision:
             decisions.put(decision)
 
     def run_terminal():
-        decision = _terminal_decision()
+        decision = _terminal_decision(tool_name)
         if decision:
             decisions.put(decision)
 
@@ -238,10 +254,10 @@ def _alert_and_decide() -> str:
         return "block"
 
 
-def _handle_exec_alert():
-    decision = _alert_and_decide()
+def _handle_tool_alert(tool_name: str):
+    decision = _alert_and_decide(tool_name)
     if decision == "block":
-        _block_exec_globally()
+        _block_tool_globally(tool_name)
 
 
 def main() -> int:
@@ -266,6 +282,7 @@ def main() -> int:
     recent: Deque[str] = deque(maxlen=20)
     recent_tool_call_ids: Deque[str] = deque(maxlen=200)
     last_popup_at = 0.0
+    risky_tools = _risky_tools()
 
     assert proc.stdout is not None
     for line in proc.stdout:
@@ -277,22 +294,28 @@ def main() -> int:
             continue
         recent.append(event_key)
 
-        match = EXEC_START_RE.search(text)
-        if match or EXEC_FAIL_RE.search(text):
-            # Prefer a stable toolCallId to avoid duplicate prompts
-            # from start/fail events of the same exec invocation.
-            if match:
-                call_id = match.group(1) or ""
-                if call_id:
-                    if call_id in recent_tool_call_ids:
-                        continue
-                    recent_tool_call_ids.append(call_id)
+        start = TOOL_START_RE.search(text)
+        fail = TOOL_FAIL_RE.search(text)
+        tool_name = ""
+        call_id = ""
+        if start:
+            tool_name = (start.group(1) or "").lower()
+            call_id = start.group(2) or ""
+        elif fail:
+            tool_name = (fail.group(1) or "").lower()
+        if tool_name and tool_name in risky_tools:
+            # Prefer stable toolCallId to avoid duplicate prompts from
+            # start/fail events of the same tool invocation.
+            if call_id:
+                if call_id in recent_tool_call_ids:
+                    continue
+                recent_tool_call_ids.append(call_id)
             now = time.time()
             # Debounce popups to avoid spam loops.
             if now - last_popup_at < 8:
                 continue
             last_popup_at = now
-            _handle_exec_alert()
+            _handle_tool_alert(tool_name)
     return 0
 
 

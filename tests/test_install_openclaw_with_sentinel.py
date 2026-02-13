@@ -17,6 +17,8 @@ from scripts.install_openclaw_with_sentinel import (
 
 class InstallOpenClawWithSentinelTests(unittest.TestCase):
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
@@ -30,6 +32,8 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         prompt_mock,
         helper_mock,
         approvals_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
         popup_guard_mock,
         _next_steps_mock,
     ):
@@ -44,9 +48,13 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         install_mock.assert_called_once_with("https://openclaw.ai/install.sh", run_onboard=True)
         helper_mock.assert_called_once_with("")
         approvals_mock.assert_called_once()
+        preexec_plugin_mock.assert_called_once()
+        injection_plugin_mock.assert_called_once()
         popup_guard_mock.assert_called_once()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
@@ -60,6 +68,8 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         prompt_mock,
         helper_mock,
         approvals_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
         popup_guard_mock,
         _next_steps_mock,
     ):
@@ -74,15 +84,29 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         install_mock.assert_not_called()
         helper_mock.assert_called_once_with("")
         approvals_mock.assert_called_once()
+        preexec_plugin_mock.assert_called_once()
+        injection_plugin_mock.assert_called_once()
         popup_guard_mock.assert_called_once()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
     @patch("scripts.install_openclaw_with_sentinel._prompt_yes_no")
     @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
-    def test_user_decline_skips_helper(self, installed_mock, prompt_mock, helper_mock, approvals_mock, popup_guard_mock, _next_steps_mock):
+    def test_user_decline_skips_helper(
+        self,
+        installed_mock,
+        prompt_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
+        _next_steps_mock,
+    ):
         installed_mock.return_value = True
         prompt_mock.return_value = False
 
@@ -92,14 +116,28 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         helper_mock.assert_not_called()
         approvals_mock.assert_not_called()
         popup_guard_mock.assert_not_called()
+        preexec_plugin_mock.assert_not_called()
+        injection_plugin_mock.assert_not_called()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
     @patch("scripts.install_openclaw_with_sentinel._prompt_yes_no")
     @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
-    def test_non_interactive_yes_calls_helper(self, installed_mock, prompt_mock, helper_mock, approvals_mock, popup_guard_mock, _next_steps_mock):
+    def test_non_interactive_yes_calls_helper(
+        self,
+        installed_mock,
+        prompt_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
+        _next_steps_mock,
+    ):
         installed_mock.return_value = True
         helper_mock.return_value = 0
         approvals_mock.return_value = 0
@@ -111,14 +149,28 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         helper_mock.assert_called_once_with("")
         approvals_mock.assert_called_once()
         popup_guard_mock.assert_called_once()
+        preexec_plugin_mock.assert_called_once()
+        injection_plugin_mock.assert_called_once()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
     @patch("scripts.install_openclaw_with_sentinel._prompt_yes_no")
     @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
-    def test_non_interactive_no_skips_helper(self, installed_mock, prompt_mock, helper_mock, approvals_mock, popup_guard_mock, _next_steps_mock):
+    def test_non_interactive_no_skips_helper(
+        self,
+        installed_mock,
+        prompt_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
+        _next_steps_mock,
+    ):
         installed_mock.return_value = True
 
         rc = main(["--non-interactive", "--enable-sentinel", "no"])
@@ -128,8 +180,12 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         helper_mock.assert_not_called()
         approvals_mock.assert_not_called()
         popup_guard_mock.assert_not_called()
+        preexec_plugin_mock.assert_not_called()
+        injection_plugin_mock.assert_not_called()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
@@ -143,6 +199,8 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         prompt_mock,
         helper_mock,
         approvals_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
         popup_guard_mock,
         _next_steps_mock,
     ):
@@ -157,14 +215,28 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         helper_mock.assert_not_called()
         approvals_mock.assert_not_called()
         popup_guard_mock.assert_not_called()
+        preexec_plugin_mock.assert_not_called()
+        injection_plugin_mock.assert_not_called()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
     @patch("scripts.install_openclaw_with_sentinel._prompt_yes_no")
     @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
-    def test_helper_failure_propagates_exit_code(self, installed_mock, prompt_mock, helper_mock, approvals_mock, popup_guard_mock, _next_steps_mock):
+    def test_helper_failure_propagates_exit_code(
+        self,
+        installed_mock,
+        prompt_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
+        _next_steps_mock,
+    ):
         installed_mock.return_value = True
         prompt_mock.return_value = True
         helper_mock.return_value = 7
@@ -175,13 +247,26 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         self.assertEqual(rc, 7)
         approvals_mock.assert_not_called()
         popup_guard_mock.assert_not_called()
+        preexec_plugin_mock.assert_not_called()
+        injection_plugin_mock.assert_not_called()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
     @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
-    def test_sentinel_network_is_passed(self, installed_mock, helper_mock, approvals_mock, popup_guard_mock, _next_steps_mock):
+    def test_sentinel_network_is_passed(
+        self,
+        installed_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
+        _next_steps_mock,
+    ):
         installed_mock.return_value = True
         helper_mock.return_value = 0
         approvals_mock.return_value = 0
@@ -192,14 +277,28 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         helper_mock.assert_called_once_with("custom-net")
         approvals_mock.assert_called_once()
         popup_guard_mock.assert_called_once()
+        preexec_plugin_mock.assert_called_once()
+        injection_plugin_mock.assert_called_once()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
     @patch("scripts.install_openclaw_with_sentinel._prompt_yes_no")
     @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
-    def test_approvals_failure_propagates_exit_code(self, installed_mock, prompt_mock, helper_mock, approvals_mock, popup_guard_mock, _next_steps_mock):
+    def test_approvals_failure_propagates_exit_code(
+        self,
+        installed_mock,
+        prompt_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
+        _next_steps_mock,
+    ):
         installed_mock.return_value = True
         prompt_mock.return_value = True
         helper_mock.return_value = 0
@@ -209,6 +308,8 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
 
         self.assertEqual(rc, 9)
         popup_guard_mock.assert_not_called()
+        preexec_plugin_mock.assert_not_called()
+        injection_plugin_mock.assert_not_called()
 
     @patch("scripts.install_openclaw_with_sentinel._run")
     def test_run_sentinel_helper_sets_network_env(self, run_mock):
@@ -241,6 +342,8 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         self.assertEqual(baseline["agents"]["main"]["allowlist"], [])
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
@@ -251,11 +354,15 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         helper_mock,
         approvals_mock,
         popup_guard_mock,
+        preexec_plugin_mock,
+        injection_plugin_mock,
         _next_steps_mock,
     ):
         installed_mock.return_value = True
         helper_mock.return_value = 0
         approvals_mock.return_value = 0
+        preexec_plugin_mock.return_value = None
+        injection_plugin_mock.return_value = None
         popup_guard_mock.side_effect = RuntimeError("launchctl failure")
 
         rc = main(["--non-interactive", "--enable-sentinel", "yes"])

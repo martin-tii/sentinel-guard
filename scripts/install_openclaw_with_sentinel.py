@@ -18,6 +18,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SENTINEL_HELPER = REPO_ROOT / "scripts" / "openclaw_configure_sentinel_sandbox.py"
 POPUP_GUARD = REPO_ROOT / "scripts" / "openclaw_popup_guard.py"
 POPUP_GUARD_LABEL = "com.sentinel.openclaw.popup-guard"
+PREEXEC_PLUGIN_ID = "sentinel-preexec"
+PREEXEC_PLUGIN_SRC = REPO_ROOT / "openclaw-plugins" / PREEXEC_PLUGIN_ID
+INJECTION_GUARD_PLUGIN_ID = "sentinel-injection-guard"
+INJECTION_GUARD_PLUGIN_SRC = REPO_ROOT / "openclaw-plugins" / INJECTION_GUARD_PLUGIN_ID
 DEFAULT_INSTALL_URL = "https://openclaw.ai/install.sh"
 INSTALL_CLI_URL = "https://openclaw.ai/install-cli.sh"
 
@@ -33,6 +37,15 @@ def _run(
     if check and rc != 0:
         raise RuntimeError(f"Command failed ({rc}): {' '.join(cmd)}")
     return int(rc)
+
+
+def _run_capture(cmd: list[str], *, cwd: Optional[Path] = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        capture_output=True,
+    )
 
 
 def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -224,6 +237,86 @@ def _print_next_steps():
     print("  openclaw sandbox list")
 
 
+def _resolve_openclaw_workspace_dir() -> Path:
+    proc = _run_capture(["openclaw", "config", "get", "agents.defaults.workspace", "--json"])
+    if proc.returncode == 0 and proc.stdout.strip():
+        try:
+            value = json.loads(proc.stdout)
+            if isinstance(value, str) and value.strip():
+                return Path(value.strip()).expanduser()
+        except Exception:
+            pass
+    return Path.home() / ".openclaw" / "workspace"
+
+
+def _install_preexec_plugin() -> Path:
+    if not PREEXEC_PLUGIN_SRC.exists():
+        raise RuntimeError(f"Missing pre-exec plugin source: {PREEXEC_PLUGIN_SRC}")
+
+    plugin_dst = Path.home() / ".openclaw" / "extensions" / PREEXEC_PLUGIN_ID
+    plugin_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(plugin_dst, ignore_errors=True)
+    shutil.copytree(PREEXEC_PLUGIN_SRC, plugin_dst)
+
+    _run(["openclaw", "config", "set", "--json", "plugins.enabled", "true"], check=False)
+    _run(
+        [
+            "openclaw",
+            "config",
+            "set",
+            "--json",
+            f"plugins.entries.{PREEXEC_PLUGIN_ID}",
+            '{"enabled":true}',
+        ],
+        check=False,
+    )
+    return plugin_dst
+
+
+def _install_injection_guard_plugin() -> Path:
+    if not INJECTION_GUARD_PLUGIN_SRC.exists():
+        raise RuntimeError(f"Missing injection guard plugin source: {INJECTION_GUARD_PLUGIN_SRC}")
+
+    plugin_dst = Path.home() / ".openclaw" / "extensions" / INJECTION_GUARD_PLUGIN_ID
+    plugin_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(plugin_dst, ignore_errors=True)
+    shutil.copytree(INJECTION_GUARD_PLUGIN_SRC, plugin_dst)
+
+    entry_payload = {
+        "enabled": True,
+        "config": {
+            "enabled": True,
+            "ollamaEndpoint": "http://localhost:11434/api/generate",
+            "promptGuardModel": "prompt-guard",
+            "llamaGuardModel": "llama-guard3",
+            "riskyTools": ["exec", "process", "write", "edit", "apply_patch"],
+            "strictTools": [
+                "read",
+                "image",
+                "sessions_list",
+                "sessions_history",
+                "sessions_send",
+                "sessions_spawn",
+                "session_status",
+            ],
+        },
+    }
+
+    _run(["openclaw", "config", "set", "--json", "plugins.enabled", "true"], check=False)
+    _run(
+        [
+            "openclaw",
+            "config",
+            "set",
+            "--json",
+            f"plugins.entries.{INJECTION_GUARD_PLUGIN_ID}",
+            json.dumps(entry_payload, separators=(",", ":")),
+        ],
+        check=False,
+    )
+    return plugin_dst
+
+
 def _install_popup_guard_launch_agent():
     launch_agents = Path.home() / "Library" / "LaunchAgents"
     launch_agents.mkdir(parents=True, exist_ok=True)
@@ -330,9 +423,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     file=sys.stderr,
                 )
                 return approvals_rc
+            plugin_path = _install_preexec_plugin()
+            print(f"Installed Sentinel pre-exec interception plugin: {plugin_path}")
+            injection_plugin_path = _install_injection_guard_plugin()
+            print(f"Installed Sentinel injection guard plugin: {injection_plugin_path}")
+            _run(["openclaw", "gateway", "restart"], check=False)
             try:
                 mode = _install_popup_guard_background()
-                print(f"Installed Sentinel popup guard ({mode}).")
+                print(f"Installed Sentinel popup guard ({mode}) as fallback.")
             except Exception as exc:
                 print(f"Warning: could not install popup guard launch agent: {exc}", file=sys.stderr)
                 print(

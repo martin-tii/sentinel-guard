@@ -21,6 +21,24 @@ Use this page as the documentation entry point.
 
 ![Sentinel approval popup](./images/approval-popup.png)
 
+### Popup Alerts You Should See
+
+Current OpenClaw + Sentinel integration can show these alerts:
+
+1. `Sentinel OpenClaw Guard` (risky tool activity)
+- Trigger: risky tool activity (`exec`, `process`, `write`, `edit`, `apply_patch`).
+- Buttons: `Block Tool` / `Ignore` (or OS-equivalent labels).
+- Source: `scripts/openclaw_popup_guard.py` (log-reactive fallback path).
+
+2. `Sentinel Injection Alert` (prompt injection/jailbreak detected)
+- Trigger: injection/jailbreak detection by `sentinel-injection-guard`.
+- Action: strict tool mode enforced (read-only style allowlist), risky tools blocked.
+- Source: `openclaw-plugins/sentinel-injection-guard/index.js`.
+
+3. Terminal alert fallback (`[Sentinel Alert] ...`)
+- Trigger: same security events when UI popup cannot be shown (headless/no desktop UI).
+- Output: visible in terminal/gateway logs.
+
 ## How Sentinel Decides (Decision Flow)
 
 This diagram shows the high-level decision pipeline Sentinel applies when an agent attempts an action: integrity checks first, then lane-specific controls for input, network, and commands, with optional AI Judge and human-approval escalation.
