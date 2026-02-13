@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -14,7 +16,10 @@ from typing import Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SENTINEL_HELPER = REPO_ROOT / "scripts" / "openclaw_configure_sentinel_sandbox.py"
+POPUP_GUARD = REPO_ROOT / "scripts" / "openclaw_popup_guard.py"
+POPUP_GUARD_LABEL = "com.sentinel.openclaw.popup-guard"
 DEFAULT_INSTALL_URL = "https://openclaw.ai/install.sh"
+INSTALL_CLI_URL = "https://openclaw.ai/install-cli.sh"
 
 
 def _run(
@@ -79,17 +84,71 @@ def _is_openclaw_installed() -> bool:
     return rc == 0
 
 
-def _install_openclaw(install_url: str):
+def _run_remote_installer(install_url: str, *, installer_args: Optional[list[str]] = None):
     with tempfile.NamedTemporaryFile(prefix="openclaw-install-", suffix=".sh", delete=False) as tmp:
         script_path = Path(tmp.name)
     try:
-        _run(["curl", "-fsSL", install_url, "-o", str(script_path)])
-        _run(["bash", str(script_path)])
+        _run(
+            [
+                "curl",
+                "--proto",
+                "=https",
+                "--tlsv1.2",
+                "--retry",
+                "3",
+                "--retry-delay",
+                "1",
+                "--connect-timeout",
+                "20",
+                "-fsSL",
+                install_url,
+                "-o",
+                str(script_path),
+            ]
+        )
+        cmd = ["bash", str(script_path)]
+        if installer_args:
+            cmd.extend(["-s", "--"])
+            cmd.extend(installer_args)
+        _run(cmd)
     finally:
         try:
             script_path.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def _install_openclaw_via_npm(*, run_onboard: bool):
+    env = os.environ.copy()
+    # Recommended by OpenClaw docs to avoid sharp/libvips build issues.
+    env["SHARP_IGNORE_GLOBAL_LIBVIPS"] = "1"
+    _run(["npm", "install", "-g", "openclaw@latest"], env=env)
+    if run_onboard:
+        _run(["openclaw", "onboard", "--install-daemon"])
+
+
+def _install_openclaw(install_url: str, *, run_onboard: bool):
+    errors: list[str] = []
+    attempts = [
+        ("installer", install_url, []),
+        ("installer-cli", INSTALL_CLI_URL, ["--onboard"] if run_onboard else ["--no-onboard"]),
+    ]
+
+    for label, url, extra_args in attempts:
+        try:
+            _run_remote_installer(url, installer_args=extra_args if label == "installer-cli" else None)
+            return
+        except RuntimeError as exc:
+            errors.append(f"{label} ({url}): {exc}")
+
+    try:
+        _install_openclaw_via_npm(run_onboard=run_onboard)
+        return
+    except RuntimeError as exc:
+        errors.append(f"npm fallback: {exc}")
+
+    message = "All OpenClaw installation methods failed:\n- " + "\n- ".join(errors)
+    raise RuntimeError(message)
 
 
 def _prompt_yes_no(question: str, *, default_yes: bool = True) -> bool:
@@ -122,10 +181,121 @@ def _run_sentinel_helper(sentinel_network: str) -> int:
     return _run([sys.executable, str(SENTINEL_HELPER)], cwd=REPO_ROOT, env=env, check=False)
 
 
+def build_default_exec_approvals() -> dict:
+    # Force approval prompts for exec by default, with deny fallback.
+    return {
+        "version": 1,
+        "socket": {},
+        "defaults": {
+            "security": "allowlist",
+            "ask": "always",
+            "askFallback": "deny",
+            "autoAllowSkills": False,
+        },
+        "agents": {
+            "main": {
+                "security": "allowlist",
+                "ask": "always",
+                "askFallback": "deny",
+                "autoAllowSkills": False,
+                "allowlist": [],
+            }
+        },
+    }
+
+
+def _apply_secure_exec_approvals() -> int:
+    payload = build_default_exec_approvals()
+    with tempfile.NamedTemporaryFile(prefix="openclaw-approvals-", suffix=".json", mode="w", delete=False) as tmp:
+        tmp.write(json.dumps(payload, separators=(",", ":")))
+        tmp_path = tmp.name
+    try:
+        return _run(["openclaw", "approvals", "set", "--file", tmp_path], check=False)
+    finally:
+        try:
+            Path(tmp_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 def _print_next_steps():
     print("\nNext steps:")
     print("  openclaw sandbox explain --json")
     print("  openclaw sandbox list")
+
+
+def _install_popup_guard_launch_agent():
+    launch_agents = Path.home() / "Library" / "LaunchAgents"
+    launch_agents.mkdir(parents=True, exist_ok=True)
+    plist_path = launch_agents / f"{POPUP_GUARD_LABEL}.plist"
+    openclaw_bin = shutil.which("openclaw") or "/opt/homebrew/bin/openclaw"
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{POPUP_GUARD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{sys.executable}</string>
+    <string>{POPUP_GUARD}</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OPENCLAW_BIN</key><string>{openclaw_bin}</string>
+  </dict>
+  <key>StandardOutPath</key><string>{str((Path.home() / '.openclaw' / 'logs' / 'sentinel-popup-guard.log'))}</string>
+  <key>StandardErrorPath</key><string>{str((Path.home() / '.openclaw' / 'logs' / 'sentinel-popup-guard.err.log'))}</string>
+</dict>
+</plist>
+"""
+    plist_path.write_text(plist, encoding="utf-8")
+    _run(["launchctl", "unload", str(plist_path)], check=False)
+    _run(["launchctl", "load", str(plist_path)], check=False)
+
+
+def _install_popup_guard_systemd_user():
+    openclaw_bin = shutil.which("openclaw") or "/usr/local/bin/openclaw"
+    user_systemd = Path.home() / ".config" / "systemd" / "user"
+    user_systemd.mkdir(parents=True, exist_ok=True)
+    service_name = f"{POPUP_GUARD_LABEL}.service"
+    service_path = user_systemd / service_name
+    log_dir = Path.home() / ".openclaw" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    service = f"""[Unit]
+Description=Sentinel OpenClaw Popup Guard
+After=default.target
+
+[Service]
+Type=simple
+Environment=OPENCLAW_BIN={openclaw_bin}
+ExecStart={sys.executable} {POPUP_GUARD}
+Restart=always
+RestartSec=2
+StandardOutput=append:{log_dir / 'sentinel-popup-guard.log'}
+StandardError=append:{log_dir / 'sentinel-popup-guard.err.log'}
+
+[Install]
+WantedBy=default.target
+"""
+    service_path.write_text(service, encoding="utf-8")
+    _run(["systemctl", "--user", "daemon-reload"], check=False)
+    rc = _run(["systemctl", "--user", "enable", "--now", service_name], check=False)
+    if rc != 0:
+        raise RuntimeError("systemd --user service install failed for popup guard.")
+
+
+def _install_popup_guard_background() -> str:
+    system = platform.system().lower()
+    if system == "darwin":
+        _install_popup_guard_launch_agent()
+        return "launch-agent"
+    if system == "linux":
+        _install_popup_guard_systemd_user()
+        return "systemd-user"
+    raise RuntimeError("Auto-install for popup guard is not supported on this OS.")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -141,7 +311,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 )
                 return 1
             print(f"OpenClaw not found. Installing from: {args.openclaw_install_url}")
-            _install_openclaw(args.openclaw_install_url)
+            _install_openclaw(args.openclaw_install_url, run_onboard=not args.non_interactive)
         else:
             print("OpenClaw detected in PATH. Skipping install.")
 
@@ -151,6 +321,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             helper_rc = _run_sentinel_helper(args.sentinel_network)
             if helper_rc != 0:
                 return helper_rc
+            print("Applying secure OpenClaw exec-approval defaults...")
+            approvals_rc = _apply_secure_exec_approvals()
+            if approvals_rc != 0:
+                print(
+                    "Failed to apply OpenClaw exec approvals baseline. "
+                    "Run `openclaw approvals set --file <path>` manually.",
+                    file=sys.stderr,
+                )
+                return approvals_rc
+            try:
+                mode = _install_popup_guard_background()
+                print(f"Installed Sentinel popup guard ({mode}).")
+            except Exception as exc:
+                print(f"Warning: could not install popup guard launch agent: {exc}", file=sys.stderr)
+                print(
+                    "Run popup guard manually:\n"
+                    f"  {sys.executable} {POPUP_GUARD}",
+                    file=sys.stderr,
+                )
         else:
             print("Sentinel hardening skipped.")
             print("Enable later with:")
@@ -160,15 +349,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
-        if args.openclaw_install_url in str(exc):
-            print(
-                "OpenClaw installer download/execution failed. "
-                "Check network access and re-run.",
-                file=sys.stderr,
-            )
+        print(
+            "OpenClaw install failed after trying installer and npm fallback methods. "
+            "Check network/npm access and re-run.",
+            file=sys.stderr,
+        )
         return 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

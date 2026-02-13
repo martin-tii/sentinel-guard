@@ -37,6 +37,11 @@ cd sentinel-guard
 python scripts/install_openclaw_with_sentinel.py
 ```
 
+Install fallback behavior:
+- First try: `https://openclaw.ai/install.sh`
+- If that fails: `https://openclaw.ai/install-cli.sh`
+- If that fails: `npm install -g openclaw@latest` (with onboarding in interactive mode)
+
 3. When prompted, approve Sentinel hardening:
 - `Enable Sentinel security hardening now? [Y/n]` -> `Y`
 
@@ -87,6 +92,20 @@ Note:
 - On OpenClaw `2026.2.9`, one observed issue is unknown key `channels.telegram.token`, which can break `openclaw config ...` commands until fixed.
 - Reconfigure Telegram via the current OpenClaw-supported flow if needed: [OpenClaw CLI docs](https://docs.openclaw.ai/cli)
 
+## OpenClaw Security Audit (Recommended)
+
+After onboarding and after major config changes, run:
+
+```bash
+openclaw security audit --deep
+```
+
+How this relates to Sentinel:
+- OpenClaw audit checks OpenClaw configuration posture and gateway/channel exposure.
+- Sentinel enforces runtime containment and policy controls during execution.
+
+Use both for defense in depth.
+
 ## What the Installer Configures
 
 When Sentinel hardening is enabled, the helper configures:
@@ -96,8 +115,31 @@ When Sentinel hardening is enabled, the helper configures:
   - `~/.openclaw/seccomp/sentinel-seccomp-datasci.json`
 - OpenClaw sandbox defaults:
   - `agents.defaults.sandbox` + `agents.defaults.sandbox.docker`
+- OpenClaw exec approvals baseline (default prompt-on-exec):
+  - `openclaw approvals set --file ...`
+  - Baseline: `ask=always`, `askFallback=deny`, `autoAllowSkills=false`
+- Sentinel popup guard (macOS LaunchAgent):
+  - `scripts/openclaw_popup_guard.py`
+  - Shows a local popup when risky `exec` activity is detected in logs
+  - Can remove `exec` from sandbox allowlist directly from the popup
 - Sandbox lifecycle refresh:
   - `openclaw sandbox recreate --all`
+
+## Popup Guard Behavior
+
+The popup guard is an extra local safety layer for terminal-first usage:
+- It monitors `openclaw logs --follow` for `exec` activity.
+- On detection, it shows a macOS dialog:
+  - `Ignore`
+  - `Block Exec` (removes `exec` from `tools.sandbox.tools.allow` and recreates sandboxes)
+- It de-duplicates alerts per exec call to avoid duplicate popups.
+
+Platform behavior:
+- macOS: installed automatically as a LaunchAgent.
+- Linux: installed automatically as a `systemd --user` service (best effort).
+- Windows/other: installer prints a manual command to run popup guard.
+
+If you do not see OpenClaw UI approvals in the browser due token mismatch/reconnect issues, this popup guard still provides a visible local alert path.
 
 ## Advanced / Manual Override
 
