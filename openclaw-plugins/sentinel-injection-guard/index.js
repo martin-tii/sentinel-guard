@@ -49,7 +49,7 @@ function showAlertBestEffort(title, message) {
   }
 }
 
-function normalizeToolList(value, fallback) {
+export function normalizeToolList(value, fallback) {
   if (!Array.isArray(value)) return new Set(fallback);
   const items = value.map((v) => String(v || "").trim().toLowerCase()).filter(Boolean);
   return new Set(items.length ? items : fallback);
@@ -71,7 +71,7 @@ function runCommand(cmd, args) {
   });
 }
 
-function parseModelUnsafe(text) {
+export function parseModelUnsafe(text) {
   const raw = String(text || "").trim().toLowerCase();
   if (!raw) return { unsafe: false, reason: "empty model response" };
   if (raw.includes("unsafe")) return { unsafe: true, reason: raw.slice(0, 200) };
@@ -95,7 +95,7 @@ async function callOllama(endpoint, model, prompt) {
   }
 }
 
-function containsInjectionHeuristics(text) {
+export function containsInjectionHeuristics(text) {
   const raw = String(text || "").toLowerCase();
   const patterns = [
     "ignore previous instructions",
@@ -110,7 +110,7 @@ function containsInjectionHeuristics(text) {
   return patterns.find((p) => raw.includes(p)) || null;
 }
 
-function extractTextFromMessageLike(value) {
+export function extractTextFromMessageLike(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
@@ -124,7 +124,7 @@ function extractTextFromMessageLike(value) {
   return "";
 }
 
-function extractCandidateText(event) {
+export function extractCandidateText(event) {
   if (!event || typeof event !== "object") return "";
   const candidates = [
     event.input,
@@ -155,7 +155,7 @@ function resolveWorkspaceDir(api) {
   return path.join(process.env.HOME || "~", ".openclaw", "workspace");
 }
 
-function safeResolveWorkspacePath(workspaceDir, rawPath) {
+export function safeResolveWorkspacePath(workspaceDir, rawPath) {
   const p = String(rawPath || "").trim();
   if (!p) return null;
   const base = path.resolve(workspaceDir);

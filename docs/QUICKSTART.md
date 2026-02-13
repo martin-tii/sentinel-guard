@@ -69,3 +69,12 @@ For ML/data-science workloads that need broader syscall coverage, use:
 ```bash
 sentinel-isolate --seccomp-profile datasci --build-if-missing -- python your_agent.py
 ```
+
+## Validation
+
+- `run_demo.sh` strict-default and standard-mode command flow.
+  - Validation: Tested by `tests/test_run_demo_script.py::RunDemoScriptTests`.
+- `sentinel-isolate` hardening flags, seccomp profile/mode options, and proxy enforcement behavior.
+  - Validation: Tested by `tests/test_isolation.py::IsolationCommandBuildTests`.
+- Troubleshooting and operational advice text.
+  - Validation: Non-executable rationale.

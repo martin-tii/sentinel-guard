@@ -369,6 +369,72 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
 
+    @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
+    def test_skip_openclaw_install_fails_when_openclaw_missing(self, installed_mock):
+        installed_mock.return_value = False
+        rc = main(["--skip-openclaw-install"])
+        self.assertEqual(rc, 1)
+
+    @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
+    @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
+    @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
+    @patch("scripts.install_openclaw_with_sentinel._prompt_yes_no")
+    @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
+    def test_non_interactive_ask_resolves_to_yes(
+        self,
+        installed_mock,
+        prompt_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        injection_plugin_mock,
+        preexec_plugin_mock,
+        _next_steps_mock,
+    ):
+        installed_mock.return_value = True
+        helper_mock.return_value = 0
+        approvals_mock.return_value = 0
+
+        rc = main(["--non-interactive", "--enable-sentinel", "ask"])
+
+        self.assertEqual(rc, 0)
+        prompt_mock.assert_not_called()
+        helper_mock.assert_called_once()
+        approvals_mock.assert_called_once()
+        popup_guard_mock.assert_called_once()
+        injection_plugin_mock.assert_called_once()
+        preexec_plugin_mock.assert_called_once()
+
+    @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
+    @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
+    @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
+    @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
+    def test_preexec_plugin_install_failure_returns_nonzero(
+        self,
+        installed_mock,
+        helper_mock,
+        approvals_mock,
+        popup_guard_mock,
+        injection_plugin_mock,
+        preexec_plugin_mock,
+        _next_steps_mock,
+    ):
+        installed_mock.return_value = True
+        helper_mock.return_value = 0
+        approvals_mock.return_value = 0
+        injection_plugin_mock.return_value = None
+        preexec_plugin_mock.side_effect = RuntimeError("plugin install failed")
+        popup_guard_mock.return_value = "launch-agent"
+
+        rc = main(["--non-interactive", "--enable-sentinel", "yes"])
+        self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

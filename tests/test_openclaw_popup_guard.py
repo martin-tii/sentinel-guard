@@ -1,6 +1,9 @@
 import os
+import queue
 import sys
+import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -10,8 +13,10 @@ from scripts.openclaw_popup_guard import (
     DEFAULT_RISKY_TOOLS,
     TOOL_FAIL_RE,
     TOOL_START_RE,
+    _alert_and_decide,
     _block_tool_globally,
     _risky_tools,
+    main,
 )
 
 
@@ -60,6 +65,63 @@ class OpenClawPopupGuardTests(unittest.TestCase):
         self.assertIn('"write"', first_cmd[5])
         self.assertIn('"image"', first_cmd[5])
         self.assertNotIn('"process"', first_cmd[5])
+
+    @patch("scripts.openclaw_popup_guard._run")
+    @patch("scripts.openclaw_popup_guard._get_allow_tools")
+    def test_block_tool_globally_uses_default_allowlist_when_missing(self, get_tools_mock, run_mock):
+        get_tools_mock.return_value = []
+        run_mock.return_value.returncode = 0
+        run_mock.return_value.stdout = ""
+        run_mock.return_value.stderr = ""
+
+        _block_tool_globally("exec")
+
+        first_cmd = run_mock.call_args_list[0].args[0]
+        self.assertEqual(first_cmd[4], "tools.sandbox.tools.allow")
+        self.assertNotIn('"exec"', first_cmd[5])
+        self.assertIn('"read"', first_cmd[5])
+        self.assertIn('"write"', first_cmd[5])
+
+    @patch("scripts.openclaw_popup_guard._popup_decision", return_value=None)
+    @patch("scripts.openclaw_popup_guard._terminal_decision", return_value=None)
+    @patch("scripts.openclaw_popup_guard.queue.Queue.get", side_effect=queue.Empty)
+    def test_alert_and_decide_timeout_defaults_to_block(self, _queue_get, _terminal_mock, _popup_mock):
+        decision = _alert_and_decide("exec")
+        self.assertEqual(decision, "block")
+
+    @patch("scripts.openclaw_popup_guard._popup_decision", return_value="block")
+    @patch("scripts.openclaw_popup_guard._terminal_decision", side_effect=lambda _: (time.sleep(0.01), "ignore")[1])
+    def test_alert_and_decide_first_responder_wins(self, _terminal_mock, _popup_mock):
+        decision = _alert_and_decide("process")
+        self.assertEqual(decision, "block")
+
+    @patch.dict(os.environ, {"SENTINEL_OPENCLAW_POPUP_TOOLS": "process"}, clear=False)
+    @patch("scripts.openclaw_popup_guard._handle_tool_alert")
+    @patch("scripts.openclaw_popup_guard.time.time")
+    @patch("scripts.openclaw_popup_guard.subprocess.Popen")
+    def test_main_dedupes_tool_call_ids_and_debounces_alerts(
+        self,
+        popen_mock,
+        time_mock,
+        handle_alert_mock,
+    ):
+        # Same toolCallId repeated should alert once; near-immediate second event is debounced.
+        lines = iter(
+            [
+                "embedded run tool start: runId=a tool=process toolCallId=proc_1\n",
+                "embedded run tool start: runId=a tool=process toolCallId=proc_1\n",
+                "embedded run tool start: runId=a tool=process toolCallId=proc_2\n",
+                "embedded run tool start: runId=a tool=process toolCallId=proc_3\n",
+            ]
+        )
+        popen_mock.return_value = SimpleNamespace(stdout=lines)
+        time_mock.side_effect = [100.0, 101.0, 111.0]
+
+        rc = main()
+        self.assertEqual(rc, 0)
+        self.assertEqual(handle_alert_mock.call_count, 2)
+        self.assertEqual(handle_alert_mock.call_args_list[0].args[0], "process")
+        self.assertEqual(handle_alert_mock.call_args_list[1].args[0], "process")
 
 
 if __name__ == "__main__":

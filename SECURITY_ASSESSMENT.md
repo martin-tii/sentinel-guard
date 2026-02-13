@@ -134,3 +134,18 @@ Impact:
 
 ## Residual Risk Statement
 Sentinel Guard provides meaningful preventive controls and strong operational safety improvements, especially when paired with container isolation. However, in-process mode alone should not be considered a complete security boundary against determined adversarial code.
+
+## Validation
+
+- Runtime hook drift detection and tamper fail-close behavior.
+  - Validation: Tested by `tests/test_integrity.py::RuntimeTamperDetectionTests`.
+- Policy integrity (SHA/HMAC/immutability/production prerequisites) controls.
+  - Validation: Tested by `tests/test_integrity.py::PolicyIntegrityTests`, `tests/test_production_controls.py::ProductionPolicyIntegrityTests`.
+- Command, network, approval, and injection-control behavior claims.
+  - Validation: Tested by `tests/test_network_policy.py::NetworkPolicyTests`, `tests/test_security_controls.py::SecurityControlTests`, `tests/test_judge.py::AIJudgeRuntimeTests`, `tests/test_injection_scan.py::InjectionScanTests`, `tests/test_approval.py::ApprovalDefaultModeTests`.
+- Isolation runtime hardening and production network exception controls.
+  - Validation: Tested by `tests/test_isolation.py::IsolationCommandBuildTests`, `tests/test_production_controls.py::ProductionIsolationNetworkTests`.
+- OpenClaw hardening and popup/plugin defense-in-depth controls.
+  - Validation: Tested by `tests/test_install_openclaw_with_sentinel.py::InstallOpenClawWithSentinelTests`, `tests/test_openclaw_sandbox_configure.py::OpenClawSandboxConfigureTests`, `tests/test_openclaw_popup_guard.py::OpenClawPopupGuardTests`, `openclaw-plugins/sentinel-preexec/tests/preexec.test.mjs`, `openclaw-plugins/sentinel-injection-guard/tests/injection-guard.test.mjs`.
+- Risk rankings, threat model interpretation, and hardening-priority recommendations.
+  - Validation: Non-executable rationale.

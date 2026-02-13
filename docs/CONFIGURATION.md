@@ -147,3 +147,20 @@ export SENTINEL_ENFORCE_PROXY=true
 - Prompt Guard is enabled by default and requires Hugging Face `transformers` plus an inference backend (for example, PyTorch).
 - `judge.injection_scan` controls automatic prompt-injection scanning across built-in user input, text file reads, and text-like HTTP responses.
 - With `on_detection: approval`, headless/no-handler environments fail safe to reject.
+
+## Validation
+
+- Host matching modes, scheme/port constraints, and socket policy checks.
+  - Validation: Tested by `tests/test_network_policy.py::NetworkPolicyTests`.
+- Dual-control disable requirement.
+  - Validation: Tested by `tests/test_security_controls.py::SecurityControlTests`.
+- Policy integrity env controls (`SENTINEL_POLICY_SHA256`, immutable drift checks, production requirements).
+  - Validation: Tested by `tests/test_integrity.py::PolicyIntegrityTests`, `tests/test_production_controls.py::ProductionPolicyIntegrityTests`.
+- Production network exception control (`SENTINEL_ALLOW_NETWORK_IN_PRODUCTION`).
+  - Validation: Tested by `tests/test_production_controls.py::ProductionIsolationNetworkTests`.
+- Runtime tuning controls for tamper-check cadence and attestation emission.
+  - Validation: Tested by `tests/test_integrity.py::IntegritySchedulingAndAttestationTests`.
+- Prompt Guard/injection scan defaults and detection modes.
+  - Validation: Tested by `tests/test_injection_scan.py::InjectionScanTests`, `tests/test_judge.py::PromptGuardDetectorTests`.
+- Profile guidance text and risk commentary.
+  - Validation: Non-executable rationale.

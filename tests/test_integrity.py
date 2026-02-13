@@ -1,8 +1,10 @@
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -70,6 +72,59 @@ class PolicyIntegrityTests(unittest.TestCase):
             os.environ["SENTINEL_POLICY_SHA256"] = "0" * 64
             with self.assertRaises(RuntimeError):
                 PolicyEnforcer(policy_path=str(policy_path))
+
+
+class IntegritySchedulingAndAttestationTests(unittest.TestCase):
+    def setUp(self):
+        self._original_env = dict(os.environ)
+        self._original_last_check = core._last_integrity_check_at
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._original_env)
+        core._last_integrity_check_at = self._original_last_check
+
+    def test_integrity_interval_seconds_clamps_non_positive(self):
+        os.environ["SENTINEL_TAMPER_CHECK_INTERVAL_MS"] = "-5"
+        self.assertEqual(core._integrity_interval_seconds(), 0.0)
+        os.environ["SENTINEL_TAMPER_CHECK_INTERVAL_MS"] = "0"
+        self.assertEqual(core._integrity_interval_seconds(), 0.0)
+
+    def test_integrity_sample_rate_is_clamped(self):
+        os.environ["SENTINEL_TAMPER_CHECK_SAMPLE_RATE"] = "-0.5"
+        self.assertEqual(core._integrity_sample_rate(), 0.0)
+        os.environ["SENTINEL_TAMPER_CHECK_SAMPLE_RATE"] = "2"
+        self.assertEqual(core._integrity_sample_rate(), 1.0)
+
+    def test_should_run_integrity_check_honors_interval_and_force(self):
+        os.environ["SENTINEL_TAMPER_CHECK_INTERVAL_MS"] = "60000"
+        os.environ["SENTINEL_TAMPER_CHECK_SAMPLE_RATE"] = "0"
+        core._last_integrity_check_at = time.monotonic()
+
+        self.assertFalse(core._should_run_integrity_check(force=False))
+        self.assertTrue(core._should_run_integrity_check(force=True))
+
+    def test_emit_startup_attestation_includes_expected_fields(self):
+        fake_attestation = {
+            "production_mode": True,
+            "policy_source": "file",
+            "signature_mode": "sha256",
+            "immutable_policy": True,
+            "policy_sha256": "abc123",
+        }
+        with mock.patch.object(core.policy, "attestation", return_value=fake_attestation):
+            with mock.patch.object(core, "audit") as audit_mock:
+                core._emit_startup_attestation()
+
+        audit_mock.assert_called_once()
+        args = audit_mock.call_args.args
+        self.assertEqual(args[0], "ATTESTATION")
+        self.assertIn("production=True", args[1])
+        self.assertIn("policy_source=file", args[1])
+        self.assertIn("signature_mode=sha256", args[1])
+        self.assertIn("immutable=True", args[1])
+        self.assertIn("policy_sha256=abc123", args[1])
+        self.assertEqual(args[2], "INFO")
 
 
 if __name__ == "__main__":

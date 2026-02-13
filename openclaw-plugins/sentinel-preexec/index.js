@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 const DEFAULT_RISKY_TOOLS = ["exec", "process", "write", "edit", "apply_patch"];
 const DEFAULT_TIMEOUT_SECONDS = 120;
 
-function toToolSet(raw) {
+export function toToolSet(raw) {
   if (!Array.isArray(raw)) return null;
   const values = raw
     .map((v) => String(v || "").trim().toLowerCase())
@@ -13,7 +13,7 @@ function toToolSet(raw) {
   return new Set(values);
 }
 
-function resolveRiskyTools(pluginConfig) {
+export function resolveRiskyTools(pluginConfig) {
   const fromCfg = toToolSet(pluginConfig?.tools);
   if (fromCfg) return fromCfg;
   const raw = process.env.SENTINEL_OPENCLAW_INTERCEPT_TOOLS?.trim();
@@ -26,7 +26,7 @@ function resolveRiskyTools(pluginConfig) {
   );
 }
 
-function resolveTimeoutMs(pluginConfig) {
+export function resolveTimeoutMs(pluginConfig) {
   const rawCfg = Number(pluginConfig?.timeoutSeconds);
   if (Number.isFinite(rawCfg) && rawCfg > 0) return Math.floor(rawCfg * 1000);
   const raw = Number(process.env.SENTINEL_OPENCLAW_INTERCEPT_TIMEOUT_SECONDS || "");
@@ -34,7 +34,7 @@ function resolveTimeoutMs(pluginConfig) {
   return DEFAULT_TIMEOUT_SECONDS * 1000;
 }
 
-function resolveFallback(pluginConfig) {
+export function resolveFallback(pluginConfig) {
   const cfg = String(pluginConfig?.fallback || "").trim().toLowerCase();
   if (cfg === "allow") return "allow";
   if (cfg === "block") return "block";

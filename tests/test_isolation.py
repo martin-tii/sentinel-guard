@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.isolation import IsolationConfig, IsolationError, build_docker_run_command
+import src.isolation as isolation
 
 
 class IsolationCommandBuildTests(unittest.TestCase):
@@ -257,6 +258,131 @@ class IsolationCommandBuildTests(unittest.TestCase):
             )
             with self.assertRaises(IsolationError):
                 build_docker_run_command(["python", "app.py"], cfg)
+
+    def test_enforce_proxy_env_blocks_network_without_proxy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+            seccomp = tmp / "seccomp.json"
+            seccomp.write_text("{}", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(seccomp),
+                network_mode="bridge",
+            )
+            original = os.environ.get("SENTINEL_ENFORCE_PROXY")
+            os.environ["SENTINEL_ENFORCE_PROXY"] = "true"
+            try:
+                with self.assertRaises(IsolationError):
+                    build_docker_run_command(["python", "app.py"], cfg)
+            finally:
+                if original is None:
+                    os.environ.pop("SENTINEL_ENFORCE_PROXY", None)
+                else:
+                    os.environ["SENTINEL_ENFORCE_PROXY"] = original
+
+    def test_invalid_publish_protocol_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+            seccomp = tmp / "seccomp.json"
+            seccomp.write_text("{}", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(seccomp),
+                network_mode="bridge",
+                publish_ports=("18789:18789/sctp",),
+            )
+            with self.assertRaises(IsolationError):
+                build_docker_run_command(["python", "app.py"], cfg)
+
+    def test_invalid_publish_port_range_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+            seccomp = tmp / "seccomp.json"
+            seccomp.write_text("{}", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(seccomp),
+                network_mode="bridge",
+                publish_ports=("70000:80",),
+            )
+            with self.assertRaises(IsolationError):
+                build_docker_run_command(["python", "app.py"], cfg)
+
+    def test_invalid_publish_shape_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+            seccomp = tmp / "seccomp.json"
+            seccomp.write_text("{}", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(seccomp),
+                network_mode="bridge",
+                publish_ports=("1:2:3:4",),
+            )
+            with self.assertRaises(IsolationError):
+                build_docker_run_command(["python", "app.py"], cfg)
+
+    def test_run_isolated_log_mode_uses_generated_seccomp_profile(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            generated = tmp / "generated-seccomp.json"
+            workspace = tmp / "workspace"
+            workspace.mkdir()
+            policy = tmp / "sentinel.yaml"
+            policy.write_text("allowed_paths: ['./workspace']\n", encoding="utf-8")
+            seccomp = tmp / "seccomp.json"
+            seccomp.write_text("{}", encoding="utf-8")
+
+            cfg = IsolationConfig(
+                workspace=str(workspace),
+                policy=str(policy),
+                seccomp=str(seccomp),
+                seccomp_mode="log",
+            )
+
+            with unittest.mock.patch.object(isolation, "_ensure_docker_available") as docker_mock, unittest.mock.patch.object(
+                isolation, "_ensure_image_available"
+            ) as image_mock, unittest.mock.patch.object(
+                isolation, "_build_log_seccomp_profile", return_value=generated
+            ) as log_profile_mock, unittest.mock.patch.object(
+                isolation, "build_docker_run_command", return_value=["docker", "run"]
+            ) as build_cmd_mock, unittest.mock.patch.object(
+                isolation.subprocess, "run", return_value=type("R", (), {"returncode": 0})()
+            ) as run_mock:
+                result = isolation.run_isolated(["python", "app.py"], cfg)
+
+            docker_mock.assert_called_once()
+            image_mock.assert_called_once()
+            log_profile_mock.assert_called_once()
+            build_cmd_mock.assert_called_once()
+            self.assertIn("seccomp_profile_override", build_cmd_mock.call_args.kwargs)
+            self.assertEqual(build_cmd_mock.call_args.kwargs["seccomp_profile_override"], generated)
+            run_mock.assert_called_once_with(["docker", "run"])
+            self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

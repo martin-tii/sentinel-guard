@@ -131,3 +131,14 @@ Performance benchmark (tamper-check interval impact):
 ```bash
 python scripts/benchmark_integrity.py
 ```
+
+## Validation
+
+- Isolation-mode CLI behavior and hardening controls.
+  - Validation: Tested by `tests/test_isolation.py::IsolationCommandBuildTests`, `tests/test_openclaw_isolation.py::OpenClawIsolationTests`.
+- Compatibility-mode guardrail behavior and prompt-injection scanning across input/file/network.
+  - Validation: Tested by `tests/test_injection_scan.py::InjectionScanTests`.
+- Approval handler defaults and auto/tkinter/console/reject routing.
+  - Validation: Tested by `tests/test_approval.py::ApprovalDefaultModeTests`.
+- Mode-selection guidance and threat-boundary descriptions.
+  - Validation: Non-executable rationale.

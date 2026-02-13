@@ -204,3 +204,16 @@ This catches non-`requests` clients via `socket.socket.connect`, but only has ho
 
 - Keep `allowed_commands` strict.
 - Avoid whitelisting interpreters (`python`, `bash`, `sh`); Sentinel has a fail-safe denylist, but least-privilege policy is still recommended.
+
+## Validation
+
+- Container hardening flags and isolation command construction.
+  - Validation: Tested by `tests/test_isolation.py::IsolationCommandBuildTests`.
+- Production-mode network gating and signed/immutable policy prerequisites.
+  - Validation: Tested by `tests/test_production_controls.py::ProductionPolicyIntegrityTests`, `tests/test_production_controls.py::ProductionIsolationNetworkTests`.
+- Entry-point workspace/policy bootstrap behavior.
+  - Validation: Tested by `tests/test_entrypoint_script.py::EntrypointScriptTests`.
+- Demo startup script execution profile selection and command path.
+  - Validation: Tested by `tests/test_run_demo_script.py::RunDemoScriptTests`.
+- Compose topology and threat-model narrative in diagrams/notes.
+  - Validation: Non-executable rationale.

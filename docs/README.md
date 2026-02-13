@@ -128,3 +128,14 @@ This is separate from the broad AI Judge (Llama Guard) and can be layered.
 
 See:
 - Configuration: [Configuration](./CONFIGURATION.md)
+
+## Validation
+
+- Entry-point command paths and recommended execution modes.
+  - Validation: Tested by `tests/test_run_demo_script.py::RunDemoScriptTests`, `tests/test_isolation.py::IsolationCommandBuildTests`, `tests/test_openclaw_isolation.py::OpenClawIsolationTests`.
+- Approval UI fallback behavior claims (popup and terminal alerts).
+  - Validation: Tested by `tests/test_openclaw_popup_guard.py::OpenClawPopupGuardTests`, `tests/test_approval.py::ApprovalDefaultModeTests`.
+- Decision pipeline controls (prompt, network, command, escalation).
+  - Validation: Tested by `tests/test_injection_scan.py::InjectionScanTests`, `tests/test_network_policy.py::NetworkPolicyTests`, `tests/test_judge.py::AIJudgeRuntimeTests`, `tests/test_approval.py::ApprovalDefaultModeTests`.
+- Architecture and guidance language in this page.
+  - Validation: Non-executable rationale.
