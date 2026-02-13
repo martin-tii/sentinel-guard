@@ -23,6 +23,12 @@ For official OpenClaw CLI workloads, use:
 sentinel-openclaw -- gateway --port 18789
 ```
 
+For a transparent OpenClaw install/onboard flow with one extra Sentinel prompt, use:
+
+```bash
+python "scripts/install_openclaw_with_sentinel.py"
+```
+
 If you are onboarding a new workload, start with seccomp complain mode, then tighten:
 
 ```bash
