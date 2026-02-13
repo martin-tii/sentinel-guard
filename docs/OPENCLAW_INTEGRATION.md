@@ -133,6 +133,8 @@ The popup guard is an extra local safety layer for terminal-first usage:
   - `Ignore`
   - `Block Exec` (removes `exec` from `tools.sandbox.tools.allow` and recreates sandboxes)
 - It de-duplicates alerts per exec call to avoid duplicate popups.
+- It also asks in terminal when a TTY is available.
+- Popup and terminal prompts run in parallel; the first response wins.
 
 Platform behavior:
 - macOS: installed automatically as a LaunchAgent.

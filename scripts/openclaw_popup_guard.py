@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 import os
+import sys
 import shutil
 import subprocess
 import time
+import threading
+import queue
 from collections import deque
 from typing import Deque
 
@@ -133,6 +136,114 @@ def _popup_exec_alert(event_text: str):
         return
 
 
+def _popup_decision() -> str | None:
+    """
+    Returns:
+      - "block" when user chooses blocking action
+      - "ignore" when user dismisses/ignores
+      - None when popup channel is unavailable
+    """
+    msg = (
+        "Sentinel Alert: OpenClaw exec tool activity detected.\n\n"
+        "Block Exec removes exec from sandbox allowlist globally."
+    )
+    system = os.uname().sysname.lower() if hasattr(os, "uname") else os.name
+
+    if system == "darwin":
+        script = (
+            'display dialog "{}" with title "Sentinel OpenClaw Guard" '
+            'buttons {{"Ignore","Block Exec"}} default button "Block Exec"'
+        ).format(msg.replace('"', '\\"'))
+        result = _run(["osascript", "-e", script], check=False)
+        output = (result.stdout or "") + (result.stderr or "")
+        return "block" if "Block Exec" in output else "ignore"
+
+    if system == "linux":
+        if not shutil.which("zenity"):
+            return None
+        result = _run(
+            [
+                "zenity",
+                "--question",
+                "--title=Sentinel OpenClaw Guard",
+                f"--text={msg}",
+                "--ok-label=Block Exec",
+                "--cancel-label=Ignore",
+            ],
+            check=False,
+        )
+        return "block" if result.returncode == 0 else "ignore"
+
+    if os.name == "nt":
+        escaped_msg = msg.replace("'", "''")
+        ps = (
+            "[void][Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); "
+            "$r=[System.Windows.Forms.MessageBox]::Show("
+            f"'{escaped_msg}',"
+            "'Sentinel OpenClaw Guard',"
+            "[System.Windows.Forms.MessageBoxButtons]::YesNo,"
+            "[System.Windows.Forms.MessageBoxIcon]::Warning); "
+            "if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 } else { exit 1 }"
+        )
+        result = _run(["powershell", "-NoProfile", "-Command", ps], check=False)
+        return "block" if result.returncode == 0 else "ignore"
+    return None
+
+
+def _terminal_decision() -> str | None:
+    # Terminal prompt only makes sense for interactive invocations.
+    if not sys.stdin or not sys.stdin.isatty():
+        return None
+    try:
+        print(
+            "\n[Sentinel OpenClaw Guard] exec detected.\n"
+            "Type 'block' to disable exec globally, or 'ignore' to continue.",
+            flush=True,
+        )
+        raw = input("> ").strip().lower()
+    except Exception:
+        return None
+    if raw in ("block", "b", "yes", "y"):
+        return "block"
+    return "ignore"
+
+
+def _alert_and_decide() -> str:
+    """
+    Run popup and terminal prompts in parallel; first responder wins.
+    Returns "block" or "ignore".
+    """
+    decisions: "queue.Queue[str]" = queue.Queue()
+
+    def run_popup():
+        decision = _popup_decision()
+        if decision:
+            decisions.put(decision)
+
+    def run_terminal():
+        decision = _terminal_decision()
+        if decision:
+            decisions.put(decision)
+
+    threads = [
+        threading.Thread(target=run_popup, daemon=True),
+        threading.Thread(target=run_terminal, daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    try:
+        return decisions.get(timeout=120)
+    except queue.Empty:
+        # Fail-safe default when nobody answers.
+        return "block"
+
+
+def _handle_exec_alert():
+    decision = _alert_and_decide()
+    if decision == "block":
+        _block_exec_globally()
+
+
 def main() -> int:
     openclaw_bin = _find_openclaw_bin()
     proc = subprocess.Popen(
@@ -181,7 +292,7 @@ def main() -> int:
             if now - last_popup_at < 8:
                 continue
             last_popup_at = now
-            _popup_exec_alert(text)
+            _handle_exec_alert()
     return 0
 
 
