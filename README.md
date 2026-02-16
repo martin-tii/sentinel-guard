@@ -33,6 +33,12 @@ OpenClaw popup/alert behavior (what users see) is documented in:
 - [docs/README.md#approval-ui](docs/README.md#approval-ui)
 - [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
 
+To verify your live OpenClaw isolation topology and proxy-only egress path:
+
+```bash
+./scripts/openclaw_isolation_healthcheck.sh
+```
+
 If you are onboarding a new workload, start with seccomp complain mode, then tighten:
 
 ```bash

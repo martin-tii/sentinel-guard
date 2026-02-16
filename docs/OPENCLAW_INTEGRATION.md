@@ -322,6 +322,26 @@ When you need enforcement now (without relying on experimental pre-exec hooks), 
 - Sentinel popup guard for visible alerts and fast operator response.
 - Sentinel injection guard strict mode (`sentinel-injection-guard`) to auto-downgrade tool access when prompt injection/jailbreak is detected.
 
+### Isolation Healthcheck
+
+Run the built-in live verification script:
+
+```bash
+./scripts/openclaw_isolation_healthcheck.sh
+```
+
+What it checks:
+- OpenClaw sandbox network config (`agents.defaults.sandbox.docker.network`)
+- Docker network exists and is `Internal=true`
+- Sandbox and proxy containers are both attached to the expected internal network
+- Direct sandbox egress test is blocked
+- Proxy endpoint reachability from sandbox is allowed
+
+Exit codes:
+- `0`: all checks passed
+- `1`: one or more isolation checks failed
+- `2`: prerequisites missing (`openclaw`, `docker`, `python3`)
+
 Strict no-write profile example (recommended for high assurance):
 
 ```bash
