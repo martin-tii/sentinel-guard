@@ -27,6 +27,44 @@ class SecurityControlTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             core.sentinel_open(str(policy_path), "r")
 
+    def test_blocked_write_alert_includes_file_write_action_and_path(self):
+        policy_path = Path(core.policy.policy_path)
+        captured = {}
+
+        def _handler(alert):
+            captured["action"] = alert.action
+            captured["target"] = alert.target
+            return False
+
+        core.set_approval_handler(_handler)
+        try:
+            with self.assertRaises(PermissionError):
+                core.sentinel_open(str(policy_path), "w")
+        finally:
+            core.clear_approval_handler()
+
+        self.assertEqual(captured.get("action"), "file_write")
+        self.assertEqual(captured.get("target"), str(policy_path.resolve()))
+
+    def test_blocked_os_open_write_flags_emit_file_write_action(self):
+        policy_path = Path(core.policy.policy_path)
+        captured = {}
+
+        def _handler(alert):
+            captured["action"] = alert.action
+            captured["target"] = alert.target
+            return False
+
+        core.set_approval_handler(_handler)
+        try:
+            with self.assertRaises(PermissionError):
+                core.sentinel_os_open(str(policy_path), os.O_WRONLY)
+        finally:
+            core.clear_approval_handler()
+
+        self.assertEqual(captured.get("action"), "file_write")
+        self.assertEqual(captured.get("target"), str(policy_path.resolve()))
+
     def test_disable_requires_dual_control(self):
         os.environ["SENTINEL_DISABLE"] = "true"
         os.environ.pop("SENTINEL_ALLOW_DISABLE", None)

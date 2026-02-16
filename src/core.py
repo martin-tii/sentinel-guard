@@ -360,6 +360,34 @@ def _should_bypass_file_policy(target):
     return False
 
 
+def _normalize_alert_path(target):
+    if isinstance(target, int):
+        return str(target)
+    try:
+        return str(pathlib.Path(os.fspath(target)).expanduser().resolve())
+    except Exception:
+        return str(target)
+
+
+def _is_write_mode(mode):
+    mode_text = str(mode or "")
+    return any(marker in mode_text for marker in ("w", "a", "x", "+"))
+
+
+def _file_action_from_mode(mode):
+    return "file_write" if _is_write_mode(mode) else "file_access"
+
+
+def _is_write_flags(flags):
+    write_mask = 0
+    for name in ("O_WRONLY", "O_RDWR", "O_APPEND", "O_CREAT", "O_TRUNC"):
+        write_mask |= int(getattr(os, name, 0))
+    try:
+        return bool(int(flags) & write_mask)
+    except Exception:
+        return False
+
+
 def _mode_reads_text(mode):
     mode_text = str(mode or "")
     if "b" in mode_text:
@@ -458,14 +486,16 @@ def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newl
     _assert_runtime_integrity()
     # 1. Static Policy Check (The Law)
     if not _should_bypass_file_policy(file):
+        action = _file_action_from_mode(mode)
+        alert_target = _normalize_alert_path(file)
         try:
             policy.check_file_access(file)
         except PermissionError as e:
             _enforce_or_escalate(
-                action="file_access",
-                target=file,
+                action=action,
+                target=alert_target,
                 reason=e,
-                recommendation="Reject unless the file path is expected for this task.",
+                recommendation="Reject unless this exact file path and operation are expected.",
             )
 
     handle = _original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
@@ -475,14 +505,16 @@ def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newl
 def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
     _assert_runtime_integrity()
     if not _should_bypass_file_policy(file):
+        action = _file_action_from_mode(mode)
+        alert_target = _normalize_alert_path(file)
         try:
             policy.check_file_access(file)
         except PermissionError as e:
             _enforce_or_escalate(
-                action="file_access",
-                target=file,
+                action=action,
+                target=alert_target,
                 reason=e,
-                recommendation="Reject unless the file path is expected for this task.",
+                recommendation="Reject unless this exact file path and operation are expected.",
             )
 
     handle = _original_io_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
@@ -492,14 +524,16 @@ def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, n
 def sentinel_path_open(self, mode='r', buffering=-1, encoding=None, errors=None, newline=None):
     _assert_runtime_integrity()
     if not _should_bypass_file_policy(self):
+        action = _file_action_from_mode(mode)
+        alert_target = _normalize_alert_path(self)
         try:
             policy.check_file_access(self)
         except PermissionError as e:
             _enforce_or_escalate(
-                action="file_access",
-                target=self,
+                action=action,
+                target=alert_target,
                 reason=e,
-                recommendation="Reject unless the file path is expected for this task.",
+                recommendation="Reject unless this exact file path and operation are expected.",
             )
 
     handle = _original_path_open(self, mode, buffering, encoding, errors, newline)
@@ -515,10 +549,12 @@ def _normalize_os_open_path(path):
 
 def sentinel_os_open(path, flags, mode=0o777, *, dir_fd=None):
     _assert_runtime_integrity()
+    action = "file_write" if _is_write_flags(flags) else "file_access"
+    alert_target = _normalize_alert_path(path)
     if dir_fd is not None:
         _enforce_or_escalate(
-            action="file_access",
-            target=path,
+            action=action,
+            target=alert_target,
             reason="os.open with dir_fd is not permitted under Sentinel policy.",
             recommendation="Reject and use normal absolute/relative paths without dir_fd.",
         )
@@ -529,10 +565,10 @@ def sentinel_os_open(path, flags, mode=0o777, *, dir_fd=None):
             policy.check_file_access(normalized_path)
         except PermissionError as e:
             _enforce_or_escalate(
-                action="file_access",
-                target=normalized_path,
+                action=action,
+                target=alert_target,
                 reason=e,
-                recommendation="Reject unless the file path is expected for this task.",
+                recommendation="Reject unless this exact file path and operation are expected.",
             )
 
     return _original_os_open(path, flags, mode)
