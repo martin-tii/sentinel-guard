@@ -264,6 +264,7 @@ The Sentinel pre-exec plugin is the primary enforcement path:
 - Default risky tools:
   - `exec`, `process`, `write`, `edit`, `apply_patch`
 - It asks via popup and terminal (if available); first response wins.
+- To reduce popup bursts, recent operator decisions are cached per tool for a short cooldown window (default: 15s).
 - `Block` denies the call before execution.
 - Popup and terminal prompts run in parallel; the first response wins.
 - Timeout/fallback behavior is secure-by-default (`block`).
@@ -280,13 +281,22 @@ Environment overrides:
 export SENTINEL_OPENCLAW_INTERCEPT_TOOLS="exec,process,write,edit,apply_patch"
 export SENTINEL_OPENCLAW_INTERCEPT_TIMEOUT_SECONDS="120"
 export SENTINEL_OPENCLAW_INTERCEPT_FALLBACK="block"
+export SENTINEL_OPENCLAW_INTERCEPT_DECISION_COOLDOWN_SECONDS="15"
 ```
+
+`SENTINEL_OPENCLAW_INTERCEPT_DECISION_COOLDOWN_SECONDS`:
+- `15` (default): reuse recent allow/block decisions briefly per tool to avoid repeated popups.
+- `0`: disable decision caching (prompt every matching tool call).
 
 ### Popup Guard Fallback
 
 The log-based popup guard remains installed as fallback defense-in-depth.
 
 If you do not see OpenClaw UI approvals in the browser due to token mismatch/reconnect issues, this popup guard still provides a visible local alert path.
+
+Recent hardening for popup spam control:
+- Singleton lock: only one popup-guard process can run at a time.
+- Fallback suppression: popup guard stays quiet when primary pre-exec approvals are available.
 
 ### Popup Catalog (What Is Highlighted/Shown)
 

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 
 const DEFAULT_RISKY_TOOLS = ["exec", "process", "write", "edit", "apply_patch"];
 const DEFAULT_TIMEOUT_SECONDS = 120;
+const DEFAULT_DECISION_COOLDOWN_SECONDS = 15;
 
 export function toToolSet(raw) {
   if (!Array.isArray(raw)) return null;
@@ -42,6 +43,34 @@ export function resolveFallback(pluginConfig) {
     .trim()
     .toLowerCase();
   return env === "allow" ? "allow" : "block";
+}
+
+export function resolveDecisionCooldownMs(pluginConfig) {
+  const rawCfg = Number(pluginConfig?.decisionCooldownSeconds);
+  if (Number.isFinite(rawCfg) && rawCfg >= 0) return Math.floor(rawCfg * 1000);
+  const rawEnv = process.env.SENTINEL_OPENCLAW_INTERCEPT_DECISION_COOLDOWN_SECONDS;
+  if (rawEnv == null || String(rawEnv).trim() === "") {
+    return DEFAULT_DECISION_COOLDOWN_SECONDS * 1000;
+  }
+  const raw = Number(rawEnv);
+  if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw * 1000);
+  return DEFAULT_DECISION_COOLDOWN_SECONDS * 1000;
+}
+
+export function readCachedDecision(cache, toolName, nowMs) {
+  const entry = cache.get(toolName);
+  if (!entry) return null;
+  if (entry.expiresAt <= nowMs) {
+    cache.delete(toolName);
+    return null;
+  }
+  return entry.decision === "allow" || entry.decision === "block" ? entry.decision : null;
+}
+
+export function storeCachedDecision(cache, toolName, decision, nowMs, cooldownMs) {
+  if (cooldownMs <= 0) return;
+  if (decision !== "allow" && decision !== "block") return;
+  cache.set(toolName, { decision, expiresAt: nowMs + cooldownMs });
 }
 
 function runCommand(cmd, args, timeoutMs) {
@@ -176,6 +205,7 @@ async function firstDecision(toolName, timeoutMs) {
 }
 
 export default function register(api) {
+  const decisionCache = new Map();
   api.on("before_tool_call", async (event) => {
     const toolName = String(event?.toolName || "")
       .trim()
@@ -185,9 +215,21 @@ export default function register(api) {
     const riskyTools = resolveRiskyTools(api.pluginConfig || {});
     if (!riskyTools.has(toolName)) return {};
 
+    const cooldownMs = resolveDecisionCooldownMs(api.pluginConfig || {});
+    const nowMs = Date.now();
+    const cachedDecision = readCachedDecision(decisionCache, toolName, nowMs);
+    if (cachedDecision === "allow") return {};
+    if (cachedDecision === "block") {
+      return {
+        block: true,
+        blockReason: `Sentinel blocked tool '${toolName}' (recent operator decision cache)`,
+      };
+    }
+
     const timeoutMs = resolveTimeoutMs(api.pluginConfig || {});
     const fallback = resolveFallback(api.pluginConfig || {});
     const decision = (await firstDecision(toolName, timeoutMs)) || fallback;
+    storeCachedDecision(decisionCache, toolName, decision, nowMs, cooldownMs);
     if (decision === "allow") return {};
     return {
       block: true,
