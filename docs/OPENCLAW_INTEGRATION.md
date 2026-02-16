@@ -26,7 +26,7 @@ What you do NOT get:
 ## Prereqs
 
 - Docker Desktop installed and running (with your home directory shared with Docker).
-- OpenClaw installed (`openclaw --version` works).
+- OpenClaw optional: if missing, the installer can bootstrap it automatically.
 
 ## Quickstart (Recommended)
 
@@ -77,6 +77,8 @@ Useful flags:
 - `--enable-sentinel yes|no|ask`: hardening behavior (`ask` defaults to `yes` in non-interactive mode).
 - `--skip-openclaw-install`: skip installer even if `openclaw` is missing.
 - `--openclaw-install-url <url>`: override installer source (default `https://openclaw.ai/install.sh`).
+- `--openclaw-install-sha256 <sha256>`: require installer digest match before execution.
+- `--allow-untrusted-installer-url`: allow non-default installer hosts (controlled environments only).
 - `--sentinel-network <name>`: override Docker network name used for sandbox containers.
 
 ## If You Hit Config Errors
@@ -284,7 +286,7 @@ export SENTINEL_OPENCLAW_INTERCEPT_FALLBACK="block"
 
 The log-based popup guard remains installed as fallback defense-in-depth.
 
-If you do not see OpenClaw UI approvals in the browser due token mismatch/reconnect issues, this popup guard still provides a visible local alert path.
+If you do not see OpenClaw UI approvals in the browser due to token mismatch/reconnect issues, this popup guard still provides a visible local alert path.
 
 ### Popup Catalog (What Is Highlighted/Shown)
 
