@@ -73,6 +73,38 @@ export function storeCachedDecision(cache, toolName, decision, nowMs, cooldownMs
   cache.set(toolName, { decision, expiresAt: nowMs + cooldownMs });
 }
 
+function firstToken(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const token = raw.split(/\s+/)[0] || "";
+  if (!token) return "";
+  const parts = token.split(/[\\/]/);
+  return parts[parts.length - 1] || token;
+}
+
+export function inferToolHint(event, toolName) {
+  const params = event?.params && typeof event.params === "object" ? event.params : {};
+  const callId = String(event?.toolCallId || event?.tool_call_id || "").trim();
+  if (toolName === "exec" || toolName === "process") {
+    const command = String(params.command || params.cmd || params.program || "").trim();
+    if (command) {
+      const exe = firstToken(command);
+      if (exe) return `Executable hint: ${exe}`;
+      return `Command: ${command.slice(0, 180)}`;
+    }
+    if (Array.isArray(params.argv) && params.argv.length > 0) {
+      const exe = firstToken(params.argv[0]);
+      if (exe) return `Executable hint: ${exe}`;
+    }
+  }
+  if (toolName === "write" || toolName === "edit" || toolName === "apply_patch") {
+    const path = String(params.path || params.file || params.target || "").trim();
+    if (path) return `File target: ${path.slice(0, 180)}`;
+  }
+  if (callId) return `Invocation ID: ${callId}`;
+  return "";
+}
+
 function runCommand(cmd, args, timeoutMs) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -107,8 +139,9 @@ function runCommand(cmd, args, timeoutMs) {
   });
 }
 
-async function popupDecision(toolName, timeoutMs) {
-  const msg = `Sentinel: allow OpenClaw tool '${toolName}'?`;
+async function popupDecision(toolName, timeoutMs, hint = "") {
+  const detail = hint ? `\n${hint}` : "";
+  const msg = `Sentinel: allow OpenClaw tool '${toolName}'?${detail}`;
   if (process.platform === "darwin") {
     const script = `display dialog "${msg.replaceAll('"', '\\"')}" with title "Sentinel OpenClaw Guard" buttons {"Allow","Block"} default button "Block"`;
     const result = await runCommand("osascript", ["-e", script], timeoutMs);
@@ -146,7 +179,7 @@ async function popupDecision(toolName, timeoutMs) {
   return null;
 }
 
-async function terminalDecision(toolName, timeoutMs) {
+async function terminalDecision(toolName, timeoutMs, hint = "") {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
   return await new Promise((resolve) => {
     const rl = readline.createInterface({
@@ -163,8 +196,9 @@ async function terminalDecision(toolName, timeoutMs) {
       resolve(value);
     };
     const timer = setTimeout(() => finish(null), timeoutMs);
+    const detail = hint ? ` (${hint})` : "";
     rl.question(
-      `[Sentinel] Allow tool '${toolName}'? Type 'allow' or 'block' [block]: `,
+      `[Sentinel] Allow tool '${toolName}'${detail}? Type 'allow' or 'block' [block]: `,
       (answer) => {
         clearTimeout(timer);
         const raw = String(answer || "")
@@ -180,7 +214,7 @@ async function terminalDecision(toolName, timeoutMs) {
   });
 }
 
-async function firstDecision(toolName, timeoutMs) {
+async function firstDecision(toolName, timeoutMs, hint = "") {
   return await new Promise((resolve) => {
     let pending = 2;
     let done = false;
@@ -198,8 +232,8 @@ async function firstDecision(toolName, timeoutMs) {
       pending -= 1;
       if (pending <= 0) finish(null);
     };
-    popupDecision(toolName, timeoutMs).then(onResult).catch(() => onResult(null));
-    terminalDecision(toolName, timeoutMs).then(onResult).catch(() => onResult(null));
+    popupDecision(toolName, timeoutMs, hint).then(onResult).catch(() => onResult(null));
+    terminalDecision(toolName, timeoutMs, hint).then(onResult).catch(() => onResult(null));
     setTimeout(() => finish(null), timeoutMs + 500);
   });
 }
@@ -228,7 +262,8 @@ export default function register(api) {
 
     const timeoutMs = resolveTimeoutMs(api.pluginConfig || {});
     const fallback = resolveFallback(api.pluginConfig || {});
-    const decision = (await firstDecision(toolName, timeoutMs)) || fallback;
+    const hint = inferToolHint(event, toolName);
+    const decision = (await firstDecision(toolName, timeoutMs, hint)) || fallback;
     storeCachedDecision(decisionCache, toolName, decision, nowMs, cooldownMs);
     if (decision === "allow") return {};
     return {

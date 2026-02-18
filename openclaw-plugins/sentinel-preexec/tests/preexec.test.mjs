@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  inferToolHint,
   readCachedDecision,
   resolveFallback,
   resolveDecisionCooldownMs,
@@ -62,4 +63,29 @@ test("decision cache stores and expires by cooldown", () => {
   storeCachedDecision(cache, "exec", "allow", now, 5000);
   assert.equal(readCachedDecision(cache, "exec", now + 1000), "allow");
   assert.equal(readCachedDecision(cache, "exec", now + 6000), null);
+});
+
+test("inferToolHint extracts executable from command-like params", () => {
+  assert.equal(
+    inferToolHint({ params: { command: "open -a Safari https://example.com" } }, "exec"),
+    "Executable hint: open",
+  );
+  assert.equal(
+    inferToolHint({ params: { argv: ["/usr/bin/ssh", "host"] } }, "exec"),
+    "Executable hint: ssh",
+  );
+});
+
+test("inferToolHint extracts file targets for write tools", () => {
+  assert.equal(
+    inferToolHint({ params: { path: "/etc/sshd_config" } }, "write"),
+    "File target: /etc/sshd_config",
+  );
+});
+
+test("inferToolHint falls back to invocation id", () => {
+  assert.equal(
+    inferToolHint({ toolCallId: "exec_1771217960664_6" }, "exec"),
+    "Invocation ID: exec_1771217960664_6",
+  );
 });
