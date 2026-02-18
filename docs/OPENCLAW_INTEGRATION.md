@@ -113,6 +113,24 @@ How this relates to Sentinel:
 
 Use both for defense in depth.
 
+## OpenClaw Approvals vs Sentinel
+
+OpenClaw native approvals ([docs](https://docs.openclaw.ai/cli/approvals)) and Sentinel controls are complementary, not duplicates:
+
+- OpenClaw approvals:
+  - Native `exec` approval policy (`openclaw approvals ...`, `exec-approvals.json`).
+  - Host-aware targeting (`local`, `--gateway`, `--node`).
+  - Primary built-in approval plane for command execution.
+
+- Sentinel layers:
+  - Runtime hardening around OpenClaw (sandbox network topology, seccomp, cap-drop, read-only root).
+  - Tool allowlist hardening (`tools.sandbox.tools.allow`) beyond only `exec`.
+  - Pre-exec interception + popup fallback + injection guard for defense-in-depth.
+
+Recommended model:
+- Treat OpenClaw approvals as the native `exec` policy source of truth.
+- Keep Sentinel enabled for containment and additional controls if OpenClaw callbacks or channels vary by runtime path.
+
 ## What the Installer Configures
 
 When Sentinel hardening is enabled, the helper configures:
