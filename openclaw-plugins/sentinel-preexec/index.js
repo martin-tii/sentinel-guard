@@ -82,6 +82,34 @@ function firstToken(value) {
   return parts[parts.length - 1] || token;
 }
 
+function intentForExecutable(exe) {
+  const name = String(exe || "").trim().toLowerCase();
+  if (!name) return "";
+  const mapping = {
+    ps: "process enumeration",
+    top: "process monitoring",
+    htop: "process monitoring",
+    pgrep: "process lookup",
+    kill: "process termination",
+    pkill: "process termination",
+    curl: "network fetch",
+    wget: "network fetch",
+    ssh: "remote shell access",
+    scp: "remote file copy",
+    rsync: "file sync/transfer",
+    nc: "raw socket/network probing",
+    nmap: "port scanning",
+    python: "script execution",
+    python3: "script execution",
+    node: "script execution",
+    bash: "shell script execution",
+    sh: "shell script execution",
+    zsh: "shell script execution",
+    open: "app/browser launch",
+  };
+  return mapping[name] || "system command execution";
+}
+
 export function inferToolHint(event, toolName) {
   const params = event?.params && typeof event.params === "object" ? event.params : {};
   const callId = String(event?.toolCallId || event?.tool_call_id || "").trim();
@@ -89,12 +117,15 @@ export function inferToolHint(event, toolName) {
     const command = String(params.command || params.cmd || params.program || "").trim();
     if (command) {
       const exe = firstToken(command);
-      if (exe) return `Executable hint: ${exe}`;
+      if (exe) return `Executable hint: ${exe} (${intentForExecutable(exe)}) | Command: ${command.slice(0, 160)}`;
       return `Command: ${command.slice(0, 180)}`;
     }
     if (Array.isArray(params.argv) && params.argv.length > 0) {
       const exe = firstToken(params.argv[0]);
-      if (exe) return `Executable hint: ${exe}`;
+      if (exe) {
+        const preview = params.argv.map((v) => String(v)).slice(0, 6).join(" ");
+        return `Executable hint: ${exe} (${intentForExecutable(exe)}) | Argv: ${preview.slice(0, 160)}`;
+      }
     }
   }
   if (toolName === "write" || toolName === "edit" || toolName === "apply_patch") {

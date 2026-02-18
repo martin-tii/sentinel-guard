@@ -29,6 +29,11 @@ For a transparent OpenClaw install/onboard flow with one extra Sentinel prompt, 
 python "scripts/install_openclaw_with_sentinel.py"
 ```
 
+During Sentinel enablement, the installer now resolves `HF_TOKEN` in this order:
+- `--hf-token <token>`
+- existing `HF_TOKEN` environment variable
+- interactive secure prompt (`getpass`) in TTY sessions
+
 OpenClaw popup/alert behavior (what users see) is documented in:
 - [docs/README.md#approval-ui](docs/README.md#approval-ui)
 - [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
@@ -199,3 +204,6 @@ pip install -e ".[prompt-guard]"
 When Prompt Guard is enabled in `sentinel.yaml` (default), make sure model access is available in your environment:
 - You may need Hugging Face authentication/access approval for Meta model artifacts.
 - Use `huggingface-cli login` (or `HF_TOKEN`) where required.
+- For OpenClaw host-side plugin inference, ensure runtime deps are installed in the same Python used by the installer:
+  - `pip install transformers torch`
+- Containerized runs should provide `HF_TOKEN` and a writable HF cache path (this repo defaults to `/tmp/huggingface` in Docker).

@@ -68,11 +68,11 @@ test("decision cache stores and expires by cooldown", () => {
 test("inferToolHint extracts executable from command-like params", () => {
   assert.equal(
     inferToolHint({ params: { command: "open -a Safari https://example.com" } }, "exec"),
-    "Executable hint: open",
+    "Executable hint: open (app/browser launch) | Command: open -a Safari https://example.com",
   );
   assert.equal(
     inferToolHint({ params: { argv: ["/usr/bin/ssh", "host"] } }, "exec"),
-    "Executable hint: ssh",
+    "Executable hint: ssh (remote shell access) | Argv: /usr/bin/ssh host",
   );
 });
 

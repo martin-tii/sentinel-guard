@@ -24,6 +24,8 @@ PREEXEC_PLUGIN_ID = "sentinel-preexec"
 PREEXEC_PLUGIN_SRC = REPO_ROOT / "openclaw-plugins" / PREEXEC_PLUGIN_ID
 INJECTION_GUARD_PLUGIN_ID = "sentinel-injection-guard"
 INJECTION_GUARD_PLUGIN_SRC = REPO_ROOT / "openclaw-plugins" / INJECTION_GUARD_PLUGIN_ID
+PROMPT_GUARD_MODEL_ID = "meta-llama/Llama-Prompt-Guard-2-86M"
+PROMPT_GUARD_BRIDGE = REPO_ROOT / "scripts" / "prompt_guard_bridge.py"
 DEFAULT_INSTALL_URL = "https://openclaw.ai/install.sh"
 INSTALL_CLI_URL = "https://openclaw.ai/install-cli.sh"
 TRUSTED_INSTALL_HOSTS = {"openclaw.ai"}
@@ -105,6 +107,14 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help=(
             "Optional Docker network override passed as SENTINEL_OPENCLAW_DOCKER_NETWORK "
             "to the Sentinel helper."
+        ),
+    )
+    parser.add_argument(
+        "--hf-token",
+        default="",
+        help=(
+            "Optional Hugging Face token used to prefetch Prompt Guard model during installation. "
+            "If omitted, installer uses HF_TOKEN env var or interactive prompt when available."
         ),
     )
     return parser.parse_args(argv)
@@ -248,6 +258,16 @@ def _prompt_yes_no(question: str, *, default_yes: bool = True) -> bool:
         print("Please answer 'y' or 'n'.")
 
 
+def _prompt_secret(question: str) -> str:
+    try:
+        import getpass
+
+        value = getpass.getpass(f"{question}: ").strip()
+    except Exception:
+        value = input(f"{question}: ").strip()
+    return value
+
+
 def _resolve_enable_choice(args: argparse.Namespace) -> bool:
     if args.enable_sentinel == "yes":
         return True
@@ -256,6 +276,30 @@ def _resolve_enable_choice(args: argparse.Namespace) -> bool:
     if args.non_interactive:
         return True
     return _prompt_yes_no("Enable Sentinel security hardening now?", default_yes=True)
+
+
+def _resolve_hf_token(args: argparse.Namespace, *, enable_sentinel: bool) -> str:
+    if not enable_sentinel:
+        return ""
+    if str(args.hf_token).strip():
+        return str(args.hf_token).strip()
+
+    env_token = str(os.environ.get("HF_TOKEN", "")).strip()
+    if env_token:
+        return env_token
+
+    if args.non_interactive:
+        return ""
+    if not getattr(sys.stdin, "isatty", lambda: False)():
+        return ""
+
+    wants = _prompt_yes_no(
+        "Add Hugging Face token now to prefetch Prompt Guard model (recommended)?",
+        default_yes=True,
+    )
+    if not wants:
+        return ""
+    return _prompt_secret("Enter HF_TOKEN")
 
 
 def _run_sentinel_helper(sentinel_network: str) -> int:
@@ -344,7 +388,7 @@ def _install_preexec_plugin() -> Path:
     return plugin_dst
 
 
-def _install_injection_guard_plugin() -> Path:
+def _install_injection_guard_plugin(*, hf_token: str = "") -> Path:
     if not INJECTION_GUARD_PLUGIN_SRC.exists():
         raise RuntimeError(f"Missing injection guard plugin source: {INJECTION_GUARD_PLUGIN_SRC}")
 
@@ -358,8 +402,11 @@ def _install_injection_guard_plugin() -> Path:
         "config": {
             "enabled": True,
             "ollamaEndpoint": "http://localhost:11434/api/generate",
-            "promptGuardModel": "prompt-guard",
+            "promptGuardModel": PROMPT_GUARD_MODEL_ID,
             "llamaGuardModel": "llama-guard3",
+            "promptGuardBridgeEnabled": True,
+            "promptGuardBridgeScript": str(PROMPT_GUARD_BRIDGE),
+            "promptGuardBridgePython": sys.executable,
             "failMode": "closed",
             "riskyTools": ["exec", "process", "write", "edit", "apply_patch"],
             "strictTools": [
@@ -386,7 +433,58 @@ def _install_injection_guard_plugin() -> Path:
         ],
         check=False,
     )
+    _prefetch_prompt_guard_model(PROMPT_GUARD_MODEL_ID, hf_token=hf_token)
     return plugin_dst
+
+
+def _prefetch_prompt_guard_model(model_id: str, *, hf_token: str = ""):
+    """
+    Best-effort prefetch for Prompt Guard model at install time.
+    This keeps install resilient while surfacing actionable warnings when
+    HF auth/runtime dependencies are missing.
+    """
+    script = str(PROMPT_GUARD_BRIDGE)
+    if not Path(script).exists():
+        print(
+            f"Warning: Prompt Guard bridge script not found at {script}; skipping model prefetch.",
+            file=sys.stderr,
+        )
+        return
+
+    probe = [
+        sys.executable,
+        script,
+        "--text",
+        "prefetch probe",
+        "--source",
+        "installer.prefetch",
+        "--model",
+        model_id,
+    ]
+    env = os.environ.copy()
+    if str(hf_token).strip():
+        env["HF_TOKEN"] = str(hf_token).strip()
+    proc = subprocess.run(
+        probe,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    if proc.returncode == 0:
+        print(f"Prefetched Prompt Guard model: {model_id}")
+        return
+
+    detail = (proc.stderr or proc.stdout or "").strip()
+    if not detail:
+        detail = f"exit code {proc.returncode}"
+    print(
+        "Warning: Prompt Guard model prefetch failed. "
+        "Installation continues, but injection guard may fail-closed until model/runtime are ready.\n"
+        f"  Model: {model_id}\n"
+        f"  Runtime: {sys.executable}\n"
+        f"  Detail: {detail}",
+        file=sys.stderr,
+    )
 
 
 def _install_popup_guard_launch_agent():
@@ -491,6 +589,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             helper_rc = _run_sentinel_helper(args.sentinel_network)
             if helper_rc != 0:
                 return helper_rc
+            hf_token = _resolve_hf_token(args, enable_sentinel=True)
             print("Applying secure OpenClaw exec-approval defaults...")
             approvals_rc = _apply_secure_exec_approvals()
             if approvals_rc != 0:
@@ -502,7 +601,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return approvals_rc
             plugin_path = _install_preexec_plugin()
             print(f"Installed Sentinel pre-exec interception plugin: {plugin_path}")
-            injection_plugin_path = _install_injection_guard_plugin()
+            injection_plugin_path = _install_injection_guard_plugin(hf_token=hf_token)
             print(f"Installed Sentinel injection guard plugin: {injection_plugin_path}")
             _run(["openclaw", "gateway", "restart"], check=False)
             try:

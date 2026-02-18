@@ -8,7 +8,15 @@
     "properties": {
       "enabled": { "type": "boolean" },
       "ollamaEndpoint": { "type": "string" },
+      "failMode": { "type": "string", "enum": ["open", "closed"] },
       "promptGuardModel": { "type": "string" },
+      "promptGuardThreshold": { "type": "number" },
+      "promptGuardMaxLength": { "type": "number" },
+      "promptGuardFailOpen": { "type": "boolean" },
+      "promptGuardBridgeEnabled": { "type": "boolean" },
+      "promptGuardBridgeScript": { "type": "string" },
+      "promptGuardBridgePython": { "type": "string" },
+      "promptGuardBridgeSource": { "type": "string" },
       "llamaGuardModel": { "type": "string" },
       "strictTools": {
         "type": "array",

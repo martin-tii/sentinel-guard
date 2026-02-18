@@ -27,6 +27,9 @@ What you do NOT get:
 
 - Docker Desktop installed and running (with your home directory shared with Docker).
 - OpenClaw optional: if missing, the installer can bootstrap it automatically.
+- Prompt Guard bridge runtime in the installer Python environment:
+  - `pip install transformers torch`
+- Hugging Face access for `meta-llama/Llama-Prompt-Guard-2-86M` (token required for gated access).
 
 ## Quickstart (Recommended)
 
@@ -41,6 +44,13 @@ cd sentinel-guard
 ```bash
 python scripts/install_openclaw_with_sentinel.py
 ```
+
+When Sentinel hardening is enabled, installer token resolution is:
+1. `--hf-token <token>`
+2. existing `HF_TOKEN` env var
+3. secure interactive prompt (`getpass`) in TTY
+
+If no token is available, install continues with a warning and injection guard remains fail-closed until model auth/runtime is fixed.
 
 Install fallback behavior:
 - First try: `https://openclaw.ai/install.sh`
@@ -69,6 +79,7 @@ cd sentinel-guard
 python scripts/install_openclaw_with_sentinel.py \
   --non-interactive \
   --enable-sentinel yes \
+  --hf-token "$HF_TOKEN" \
   --sentinel-network sentinel-sandbox_sentinel-internal
 ```
 
@@ -80,6 +91,7 @@ Useful flags:
 - `--openclaw-install-sha256 <sha256>`: require installer digest match before execution.
 - `--allow-untrusted-installer-url`: allow non-default installer hosts (controlled environments only).
 - `--sentinel-network <name>`: override Docker network name used for sandbox containers.
+- `--hf-token <token>`: supply Hugging Face token for Prompt Guard model prefetch.
 
 ## If You Hit Config Errors
 
@@ -154,7 +166,10 @@ When Sentinel hardening is enabled, the helper configures:
   - `openclaw-plugins/sentinel-injection-guard/index.js`
   - Installs into `~/.openclaw/extensions/sentinel-injection-guard`
   - Enabled via `plugins.entries.sentinel-injection-guard.enabled=true`
-  - Uses `prompt-guard` + `llama-guard3` via Ollama endpoint (`http://localhost:11434/api/generate`)
+  - Uses a Prompt Guard bridge (`scripts/prompt_guard_bridge.py`) for Hugging Face Transformers model inference (`meta-llama/Llama-Prompt-Guard-2-86M`)
+  - Uses `llama-guard3` via Ollama endpoint (`http://localhost:11434/api/generate`)
+  - Bridge runtime prerequisites: `transformers` + backend (`torch`), and HF access token for gated Meta model
+  - Installer attempts Prompt Guard model prefetch during setup; if auth/deps are missing, install continues with a warning and guard remains fail-closed until fixed
   - On detection, enforces strict tool profile and flags session as high risk
   - Fallback cleanup: if flagged session still executes `write`, plugin deletes created file in workspace
 - Sentinel popup guard fallback service:

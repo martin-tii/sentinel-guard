@@ -6,8 +6,10 @@ import {
   extractCandidateText,
   modelUnavailableVerdict,
   normalizeToolList,
+  parsePromptGuardBridgeOutput,
   parseModelUnsafe,
   resolveFailMode,
+  resolvePromptGuardBridge,
   safeResolveWorkspacePath,
 } from "../index.js";
 
@@ -52,4 +54,22 @@ test("modelUnavailableVerdict enforces selected fail mode", () => {
   assert.equal(closed.safe, false);
   const open = modelUnavailableVerdict("open");
   assert.equal(open.safe, true);
+});
+
+test("resolvePromptGuardBridge returns null unless configured", () => {
+  assert.equal(resolvePromptGuardBridge({}), null);
+  const bridge = resolvePromptGuardBridge({
+    promptGuardBridgeScript: "/tmp/prompt_guard_bridge.py",
+    promptGuardBridgePython: "python3",
+  });
+  assert.equal(bridge.script, "/tmp/prompt_guard_bridge.py");
+  assert.equal(bridge.python, "python3");
+});
+
+test("parsePromptGuardBridgeOutput parses trailing JSON line", () => {
+  const parsed = parsePromptGuardBridgeOutput("warning line\n{\"ok\":true,\"safe\":false,\"reason\":\"flagged\",\"label\":\"jailbreak\",\"score\":0.91}\n");
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.safe, false);
+  assert.equal(parsed.reason, "flagged");
+  assert.equal(parsed.label, "jailbreak");
 });

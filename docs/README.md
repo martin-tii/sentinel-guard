@@ -21,6 +21,7 @@ Use this page as the documentation entry point.
 - Security posture and residual risks: [../SECURITY_ASSESSMENT.md](../SECURITY_ASSESSMENT.md)
 - OpenClaw integration: [OPENCLAW_INTEGRATION.md](./OPENCLAW_INTEGRATION.md)
   - Transparent installer step: `cd sentinel-guard && python scripts/install_openclaw_with_sentinel.py`
+  - Installer resolves `HF_TOKEN` via `--hf-token`, env, or secure prompt
 - Approval UI details: [Usage Modes](./USAGE_MODES.md#approval-handlers)
 
 ## Approval UI
