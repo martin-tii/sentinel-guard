@@ -3,19 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   buildDecisionCacheKey,
-  buildTelegramCallbackData,
   inferDecisionFingerprint,
   inferToolHint,
   isProcessPollInvocation,
   normalizeKnownToolArgs,
-  parseNumericIdSet,
-  parseTelegramCallbackData,
   readCachedDecision,
   resolveFallback,
   resolveDecisionCooldownMs,
   resolveRiskyTools,
   resolveTimeoutMs,
-  signTelegramApproval,
   storeCachedDecision,
   toToolSet,
 } from "../index.js";
@@ -148,18 +144,4 @@ test("isProcessPollInvocation detects process poll calls", () => {
     isProcessPollInvocation({ toolName: "process", params: { action: "list" } }),
     false,
   );
-});
-
-test("parseNumericIdSet accepts arrays and csv", () => {
-  assert.deepEqual([...parseNumericIdSet([123, "456", "x"])], [123, 456]);
-  assert.deepEqual([...parseNumericIdSet("111, 222, nope")], [111, 222]);
-});
-
-test("telegram callback data is signed and parseable", () => {
-  const token = buildTelegramCallbackData("a1b2c3d4e5f6", "allow", "secret-key");
-  const parsed = parseTelegramCallbackData(token);
-  assert.equal(parsed?.approvalId, "a1b2c3d4e5f6");
-  assert.equal(parsed?.decision, "allow");
-  const expected = signTelegramApproval("a1b2c3d4e5f6", "allow", "secret-key");
-  assert.equal(parsed?.sig, expected);
 });
