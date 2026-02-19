@@ -19,6 +19,10 @@ const DEFAULT_STRICT_TOOLS = [
 ];
 
 const flaggedSessions = new Map();
+const strictProfileState = {
+  enforced: false,
+  previousAllowlist: null,
+};
 
 function showAlertBestEffort(title, message) {
   const msg = String(message || "").replaceAll("\n", " ").trim();
@@ -249,10 +253,40 @@ export function safeResolveWorkspacePath(workspaceDir, rawPath) {
 }
 
 async function enforceStrictTools(api, strictTools) {
+  if (!strictProfileState.enforced) {
+    const current = await runCommand("openclaw", ["config", "get", "--json", "tools.sandbox.tools.allow"]);
+    if (current.code === 0) {
+      const raw = String(current.stdout || "").trim();
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            strictProfileState.previousAllowlist = parsed.map((item) => String(item));
+          }
+        } catch {}
+      }
+    }
+  }
   const payload = JSON.stringify(Array.from(strictTools), null, 0);
   await runCommand("openclaw", ["config", "set", "--json", "tools.sandbox.tools.allow", payload]);
   await runCommand("openclaw", ["sandbox", "recreate", "--all"]);
+  strictProfileState.enforced = true;
   api.logger.warn("sentinel-injection-guard: strict tool profile enforced");
+}
+
+async function restoreStrictTools(api) {
+  if (!strictProfileState.enforced) return;
+  const previous = strictProfileState.previousAllowlist;
+  if (!Array.isArray(previous)) {
+    strictProfileState.enforced = false;
+    return;
+  }
+  const payload = JSON.stringify(previous, null, 0);
+  await runCommand("openclaw", ["config", "set", "--json", "tools.sandbox.tools.allow", payload]);
+  await runCommand("openclaw", ["sandbox", "recreate", "--all"]);
+  strictProfileState.enforced = false;
+  strictProfileState.previousAllowlist = null;
+  api.logger.warn("sentinel-injection-guard: restored sandbox tool allowlist after safe re-check");
 }
 
 async function evaluateInjection(api, text, cfg) {
@@ -317,7 +351,10 @@ export default function register(api) {
     const verdict = await evaluateInjection(api, text, cfg);
     if (verdict.safe) {
       // Recover session from prior strict-mode flags once current input is re-evaluated as safe.
-      flaggedSessions.delete(sessionKey);
+      const hadFlag = flaggedSessions.delete(sessionKey);
+      if (hadFlag && flaggedSessions.size === 0) {
+        await restoreStrictTools(api);
+      }
       return {};
     }
 

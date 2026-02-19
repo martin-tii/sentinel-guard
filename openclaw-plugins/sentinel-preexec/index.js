@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 const DEFAULT_RISKY_TOOLS = ["exec", "process", "write", "edit", "apply_patch"];
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const DEFAULT_DECISION_COOLDOWN_SECONDS = 15;
+const DEFAULT_MAX_PROCESS_POLLS_PER_SESSION = 2;
 
 export function toToolSet(raw) {
   if (!Array.isArray(raw)) return null;
@@ -73,6 +74,13 @@ export function storeCachedDecision(cache, toolName, decision, nowMs, cooldownMs
   cache.set(toolName, { decision, expiresAt: nowMs + cooldownMs });
 }
 
+function normalizeForKey(value, maxLen = 180) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, maxLen);
+}
+
 function firstToken(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -134,6 +142,80 @@ export function inferToolHint(event, toolName) {
   }
   if (callId) return `Invocation ID: ${callId}`;
   return "";
+}
+
+export function inferDecisionFingerprint(event, toolName) {
+  const params = event?.params && typeof event.params === "object" ? event.params : {};
+  if (toolName === "exec" || toolName === "process") {
+    const command = normalizeForKey(params.command || params.cmd || params.program, 220);
+    if (command) {
+      const exe = firstToken(command).toLowerCase();
+      return exe ? `exe:${exe}|cmd:${command}` : `cmd:${command}`;
+    }
+    if (Array.isArray(params.argv) && params.argv.length > 0) {
+      const argv = params.argv.map((v) => String(v || "")).filter(Boolean);
+      if (argv.length > 0) {
+        const exe = firstToken(argv[0]).toLowerCase();
+        const preview = normalizeForKey(argv.slice(0, 8).join(" "), 220);
+        return exe ? `exe:${exe}|argv:${preview}` : `argv:${preview}`;
+      }
+    }
+    return "generic";
+  }
+  if (toolName === "write" || toolName === "edit" || toolName === "apply_patch") {
+    const target = normalizeForKey(params.path || params.file || params.target, 220);
+    return target ? `path:${target}` : "generic";
+  }
+  if (toolName === "browser") {
+    const action = normalizeForKey(params.action || params.op || "", 40) || "unknown";
+    const targetUrl = normalizeForKey(params.targetUrl || params.url || "", 220);
+    if (targetUrl) return `action:${action}|url:${targetUrl}`;
+    return `action:${action}`;
+  }
+  return "generic";
+}
+
+export function buildDecisionCacheKey(event, toolName, sessionKey = "global") {
+  const scope = normalizeForKey(sessionKey, 120) || "global";
+  const fingerprint = inferDecisionFingerprint(event, toolName);
+  return `${scope}|${toolName}|${fingerprint}`;
+}
+
+function resolveMaxProcessPolls(pluginConfig) {
+  const rawCfg = Number(pluginConfig?.maxProcessPollsPerSession);
+  if (Number.isFinite(rawCfg) && rawCfg >= 0) return Math.floor(rawCfg);
+  const rawEnv = Number(process.env.SENTINEL_OPENCLAW_MAX_PROCESS_POLLS_PER_SESSION || "");
+  if (Number.isFinite(rawEnv) && rawEnv >= 0) return Math.floor(rawEnv);
+  return DEFAULT_MAX_PROCESS_POLLS_PER_SESSION;
+}
+
+export function isProcessPollInvocation(event) {
+  const toolName = String(event?.toolName || "")
+    .trim()
+    .toLowerCase();
+  if (toolName !== "process") return false;
+  const params = event?.params && typeof event.params === "object" ? event.params : {};
+  const action = normalizeForKey(params.action || params.op || params.command || "", 40).toLowerCase();
+  if (action === "poll") return true;
+  const command = normalizeForKey(params.command || params.cmd || "", 80).toLowerCase();
+  if (command.startsWith("poll")) return true;
+  return false;
+}
+
+export function normalizeKnownToolArgs(event) {
+  const toolName = String(event?.toolName || "")
+    .trim()
+    .toLowerCase();
+  if (toolName !== "web_search") return false;
+  const params = event?.params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return false;
+  const query = String(params.query || "").trim();
+  if (query) return false;
+  const q = String(params.q || "").trim();
+  if (!q) return false;
+  event.params = { ...params, query: q };
+  delete event.params.q;
+  return true;
 }
 
 function runCommand(cmd, args, timeoutMs) {
@@ -271,18 +353,40 @@ async function firstDecision(toolName, timeoutMs, hint = "") {
 
 export default function register(api) {
   const decisionCache = new Map();
-  api.on("before_tool_call", async (event) => {
+  const processPollCounts = new Map();
+  api.on("before_tool_call", async (event, ctx) => {
     const toolName = String(event?.toolName || "")
       .trim()
       .toLowerCase();
     if (!toolName) return {};
 
+    if (normalizeKnownToolArgs(event)) {
+      api.logger?.info?.("sentinel-preexec: normalized web_search args (q -> query)");
+    }
+
     const riskyTools = resolveRiskyTools(api.pluginConfig || {});
     if (!riskyTools.has(toolName)) return {};
 
+    const sessionKey = String(ctx?.sessionKey || "global");
+    if (isProcessPollInvocation(event)) {
+      const maxPolls = resolveMaxProcessPolls(api.pluginConfig || {});
+      const currentPolls = (processPollCounts.get(sessionKey) || 0) + 1;
+      processPollCounts.set(sessionKey, currentPolls);
+      if (maxPolls >= 0 && currentPolls > maxPolls) {
+        return {
+          block: true,
+          blockReason:
+            "Sentinel blocked repeated process polling. Summarize available results and return a final user response.",
+        };
+      }
+    } else if (toolName !== "process") {
+      processPollCounts.set(sessionKey, 0);
+    }
+
+    const cacheKey = buildDecisionCacheKey(event, toolName, sessionKey);
     const cooldownMs = resolveDecisionCooldownMs(api.pluginConfig || {});
     const nowMs = Date.now();
-    const cachedDecision = readCachedDecision(decisionCache, toolName, nowMs);
+    const cachedDecision = readCachedDecision(decisionCache, cacheKey, nowMs);
     if (cachedDecision === "allow") return {};
     if (cachedDecision === "block") {
       return {
@@ -295,7 +399,7 @@ export default function register(api) {
     const fallback = resolveFallback(api.pluginConfig || {});
     const hint = inferToolHint(event, toolName);
     const decision = (await firstDecision(toolName, timeoutMs, hint)) || fallback;
-    storeCachedDecision(decisionCache, toolName, decision, nowMs, cooldownMs);
+    storeCachedDecision(decisionCache, cacheKey, decision, nowMs, cooldownMs);
     if (decision === "allow") return {};
     return {
       block: true,

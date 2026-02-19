@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildDecisionCacheKey,
+  inferDecisionFingerprint,
   inferToolHint,
+  isProcessPollInvocation,
+  normalizeKnownToolArgs,
   readCachedDecision,
   resolveFallback,
   resolveDecisionCooldownMs,
@@ -87,5 +91,57 @@ test("inferToolHint falls back to invocation id", () => {
   assert.equal(
     inferToolHint({ toolCallId: "exec_1771217960664_6" }, "exec"),
     "Invocation ID: exec_1771217960664_6",
+  );
+});
+
+test("normalizeKnownToolArgs rewrites web_search q to query", () => {
+  const event = { toolName: "web_search", params: { q: "gyms in Abu Dhabi", page: 1 } };
+  const changed = normalizeKnownToolArgs(event);
+  assert.equal(changed, true);
+  assert.equal(event.params.query, "gyms in Abu Dhabi");
+  assert.equal("q" in event.params, false);
+});
+
+test("decision fingerprint isolates exec approvals by executable", () => {
+  const safari = inferDecisionFingerprint(
+    { params: { command: 'open -a Safari "https://example.com"' } },
+    "exec",
+  );
+  const ssh = inferDecisionFingerprint({ params: { command: "ssh prod" } }, "exec");
+  assert.notEqual(safari, ssh);
+});
+
+test("decision cache key scopes by session and operation", () => {
+  const keyA = buildDecisionCacheKey(
+    { params: { command: 'open -a Safari "https://example.com"' } },
+    "exec",
+    "agent:main:main",
+  );
+  const keyB = buildDecisionCacheKey(
+    { params: { command: "ssh prod" } },
+    "exec",
+    "agent:main:main",
+  );
+  const keyC = buildDecisionCacheKey(
+    { params: { command: "ssh prod" } },
+    "exec",
+    "agent:other:main",
+  );
+  assert.notEqual(keyA, keyB);
+  assert.notEqual(keyB, keyC);
+});
+
+test("isProcessPollInvocation detects process poll calls", () => {
+  assert.equal(
+    isProcessPollInvocation({ toolName: "process", params: { action: "poll", session: "abc" } }),
+    true,
+  );
+  assert.equal(
+    isProcessPollInvocation({ toolName: "process", params: { command: "poll neat-seaslug" } }),
+    true,
+  );
+  assert.equal(
+    isProcessPollInvocation({ toolName: "process", params: { action: "list" } }),
+    false,
   );
 });
