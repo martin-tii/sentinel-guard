@@ -315,7 +315,11 @@ export default function register(api) {
     if (!text) return {};
 
     const verdict = await evaluateInjection(api, text, cfg);
-    if (verdict.safe) return {};
+    if (verdict.safe) {
+      // Recover session from prior strict-mode flags once current input is re-evaluated as safe.
+      flaggedSessions.delete(sessionKey);
+      return {};
+    }
 
     flaggedSessions.set(sessionKey, {
       flaggedAt: Date.now(),
