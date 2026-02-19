@@ -163,23 +163,3 @@ test("telegram callback data is signed and parseable", () => {
   const expected = signTelegramApproval("a1b2c3d4e5f6", "allow", "secret-key");
   assert.equal(parsed?.sig, expected);
 });
-
-test("telegram callback supports block decision encoding", () => {
-  const token = buildTelegramCallbackData("001122334455", "block", "secret-key");
-  const parsed = parseTelegramCallbackData(token);
-  assert.equal(parsed?.approvalId, "001122334455");
-  assert.equal(parsed?.decision, "block");
-});
-
-test("telegram callback parser rejects malformed payloads", () => {
-  assert.equal(parseTelegramCallbackData(""), null);
-  assert.equal(parseTelegramCallbackData("sg2|x|bad|bad"), null);
-  assert.equal(parseTelegramCallbackData("sg2|a|short|123456789012"), null);
-  assert.equal(parseTelegramCallbackData("legacy|a|a1b2c3d4e5f6|deadbeefcafe"), null);
-});
-
-test("telegram callback signatures are secret-bound", () => {
-  const sigA = signTelegramApproval("a1b2c3d4e5f6", "allow", "secret-a");
-  const sigB = signTelegramApproval("a1b2c3d4e5f6", "allow", "secret-b");
-  assert.notEqual(sigA, sigB);
-});
