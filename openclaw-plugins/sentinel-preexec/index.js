@@ -387,8 +387,16 @@ export default function register(api) {
     const cooldownMs = resolveDecisionCooldownMs(api.pluginConfig || {});
     const nowMs = Date.now();
     const cachedDecision = readCachedDecision(decisionCache, cacheKey, nowMs);
-    if (cachedDecision === "allow") return {};
+    if (cachedDecision === "allow") {
+      api.logger?.info?.(
+        `sentinel-preexec: allow (cached) session=${sessionKey} tool=${toolName} key=${cacheKey.slice(0, 220)}`,
+      );
+      return {};
+    }
     if (cachedDecision === "block") {
+      api.logger?.warn?.(
+        `sentinel-preexec: block (cached) session=${sessionKey} tool=${toolName} key=${cacheKey.slice(0, 220)}`,
+      );
       return {
         block: true,
         blockReason: `Sentinel blocked tool '${toolName}' (recent operator decision cache)`,
@@ -398,12 +406,20 @@ export default function register(api) {
     const timeoutMs = resolveTimeoutMs(api.pluginConfig || {});
     const fallback = resolveFallback(api.pluginConfig || {});
     const hint = inferToolHint(event, toolName);
-    const decision = (await firstDecision(toolName, timeoutMs, hint)) || fallback;
+    const userDecision = await firstDecision(toolName, timeoutMs, hint);
+    const decision = userDecision || fallback;
+    const path = userDecision ? "operator" : `fallback:${fallback}`;
+    api.logger?.info?.(
+      `sentinel-preexec: decision=${decision} path=${path} session=${sessionKey} tool=${toolName} hint=${(hint || "").slice(0, 220)}`,
+    );
     storeCachedDecision(decisionCache, cacheKey, decision, nowMs, cooldownMs);
     if (decision === "allow") return {};
+    const suffix = userDecision
+      ? "operator denied"
+      : `no approval response within ${Math.floor(timeoutMs / 1000)}s; fallback=${fallback}`;
     return {
       block: true,
-      blockReason: `Sentinel blocked tool '${toolName}' before execution`,
+      blockReason: `Sentinel blocked tool '${toolName}' before execution (${suffix})`,
     };
   });
 }
