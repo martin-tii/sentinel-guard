@@ -302,10 +302,15 @@ The Sentinel pre-exec plugin is the primary enforcement path:
 - Default risky tools:
   - `exec`, `process`, `write`, `edit`, `apply_patch`
 - It asks via popup and terminal (if available); first response wins.
-- To reduce popup bursts, recent operator decisions are cached per tool for a short cooldown window (default: 15s).
+- To reduce popup bursts, recent operator decisions are cached for a short cooldown window (default: 15s), scoped by:
+  - session key
+  - tool name
+  - operation fingerprint (for example executable/command/path/url)
 - `Block` denies the call before execution.
 - Popup and terminal prompts run in parallel; the first response wins.
 - Timeout/fallback behavior is secure-by-default (`block`).
+- Block reason now reports why (`operator denied`, `cached block`, or `no approval response ... fallback=...`).
+- Repeated `process poll` loops are capped per session (default: 2), then blocked to force a final response path.
 
 Current OpenClaw reality check (`2026.2.12`):
 - The plugin is installed and loaded, but interception behavior can vary depending on runtime path/fallback mode.
@@ -320,11 +325,27 @@ export SENTINEL_OPENCLAW_INTERCEPT_TOOLS="exec,process,write,edit,apply_patch"
 export SENTINEL_OPENCLAW_INTERCEPT_TIMEOUT_SECONDS="120"
 export SENTINEL_OPENCLAW_INTERCEPT_FALLBACK="block"
 export SENTINEL_OPENCLAW_INTERCEPT_DECISION_COOLDOWN_SECONDS="15"
+export SENTINEL_OPENCLAW_MAX_PROCESS_POLLS_PER_SESSION="2"
 ```
 
 `SENTINEL_OPENCLAW_INTERCEPT_DECISION_COOLDOWN_SECONDS`:
-- `15` (default): reuse recent allow/block decisions briefly per tool to avoid repeated popups.
+- `15` (default): reuse recent allow/block decisions briefly (same session + same operation fingerprint) to avoid repeated popups.
 - `0`: disable decision caching (prompt every matching tool call).
+
+`SENTINEL_OPENCLAW_MAX_PROCESS_POLLS_PER_SESSION`:
+- `2` (default): allow at most 2 `process poll` calls per session before Sentinel blocks additional polls.
+- `0`: block all `process poll` attempts immediately.
+
+### Channel-Specific Fallback Recommendation
+
+For interactive desktop/UI usage, keep secure default:
+- `fallback=block`
+
+For remote/headless channels where local popup/TTY approval may be unavailable (for example Telegram), use:
+- `fallback=allow`
+- shorter timeout (for example `timeoutSeconds=45`)
+
+This avoids false hard-blocks caused only by missing approval UI, while still logging the decision path in gateway logs.
 
 ### Popup Guard Fallback
 
