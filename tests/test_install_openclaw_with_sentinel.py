@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from scripts.install_openclaw_with_sentinel import (
     SENTINEL_HELPER,
     _install_openclaw,
+    _resolve_hf_token,
     _run_remote_installer,
     _validate_installer_url,
     build_default_exec_approvals,
@@ -20,6 +21,12 @@ from scripts.install_openclaw_with_sentinel import (
 
 
 class InstallOpenClawWithSentinelTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime_patcher = patch("scripts.install_openclaw_with_sentinel._ensure_prompt_guard_runtime")
+        self.runtime_mock = self.runtime_patcher.start()
+        self.runtime_mock.return_value = Path("/tmp/sentinel-runtime/bin/python")
+        self.addCleanup(self.runtime_patcher.stop)
+
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
     @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
@@ -484,6 +491,47 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
 
         rc = main(["--non-interactive", "--enable-sentinel", "yes"])
         self.assertEqual(rc, 1)
+
+    @patch("scripts.install_openclaw_with_sentinel._load_hf_token_from_repo_env")
+    def test_resolve_hf_token_prefers_cli_arg(self, repo_env_mock):
+        repo_env_mock.return_value = "repo-token"
+        args = type(
+            "Args",
+            (),
+            {
+                "hf_token": "cli-token",
+                "non_interactive": True,
+            },
+        )()
+        self.assertEqual(_resolve_hf_token(args, enable_sentinel=True), "cli-token")
+
+    @patch("scripts.install_openclaw_with_sentinel._load_hf_token_from_repo_env")
+    @patch.dict(os.environ, {"HF_TOKEN": "env-token"}, clear=False)
+    def test_resolve_hf_token_uses_env_before_repo(self, repo_env_mock):
+        repo_env_mock.return_value = "repo-token"
+        args = type(
+            "Args",
+            (),
+            {
+                "hf_token": "",
+                "non_interactive": True,
+            },
+        )()
+        self.assertEqual(_resolve_hf_token(args, enable_sentinel=True), "env-token")
+
+    @patch("scripts.install_openclaw_with_sentinel._load_hf_token_from_repo_env")
+    @patch.dict(os.environ, {}, clear=True)
+    def test_resolve_hf_token_uses_repo_env_when_process_env_missing(self, repo_env_mock):
+        repo_env_mock.return_value = "repo-token"
+        args = type(
+            "Args",
+            (),
+            {
+                "hf_token": "",
+                "non_interactive": True,
+            },
+        )()
+        self.assertEqual(_resolve_hf_token(args, enable_sentinel=True), "repo-token")
 
 
 if __name__ == "__main__":

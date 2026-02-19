@@ -27,8 +27,9 @@ What you do NOT get:
 
 - Docker Desktop installed and running (with your home directory shared with Docker).
 - OpenClaw optional: if missing, the installer can bootstrap it automatically.
-- Prompt Guard bridge runtime in the installer Python environment:
-  - `pip install transformers torch`
+- Installer-managed Prompt Guard runtime (automatic):
+  - Creates/uses `~/.openclaw/sentinel-runtime`
+  - Installs `transformers` + `torch` there automatically
 - Hugging Face access for `meta-llama/Llama-Prompt-Guard-2-86M` (token required for gated access).
 
 ## Quickstart (Recommended)
@@ -51,6 +52,10 @@ When Sentinel hardening is enabled, installer token resolution is:
 3. secure interactive prompt (`getpass`) in TTY
 
 If no token is available, install continues with a warning and injection guard remains fail-closed until model auth/runtime is fixed.
+
+No manual `venv activate` step is required for customers:
+- installer writes `plugins.entries.sentinel-injection-guard.config.promptGuardBridgePython`
+- value points to `~/.openclaw/sentinel-runtime/bin/python` (or platform equivalent)
 
 Install fallback behavior:
 - First try: `https://openclaw.ai/install.sh`

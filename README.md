@@ -32,7 +32,13 @@ python "scripts/install_openclaw_with_sentinel.py"
 During Sentinel enablement, the installer now resolves `HF_TOKEN` in this order:
 - `--hf-token <token>`
 - existing `HF_TOKEN` environment variable
+- `sentinel-guard/.env` (`HF_TOKEN=...`)
 - interactive secure prompt (`getpass`) in TTY sessions
+
+Installer also provisions a dedicated Prompt Guard runtime automatically at:
+- `~/.openclaw/sentinel-runtime`
+
+This runtime is wired into OpenClaw plugin config (`promptGuardBridgePython`) so end users do not need to manually activate Python environments.
 
 OpenClaw popup/alert behavior (what users see) is documented in:
 - [docs/README.md#approval-ui](docs/README.md#approval-ui)

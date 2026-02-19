@@ -29,6 +29,7 @@ PROMPT_GUARD_BRIDGE = REPO_ROOT / "scripts" / "prompt_guard_bridge.py"
 DEFAULT_INSTALL_URL = "https://openclaw.ai/install.sh"
 INSTALL_CLI_URL = "https://openclaw.ai/install-cli.sh"
 TRUSTED_INSTALL_HOSTS = {"openclaw.ai"}
+SENTINEL_RUNTIME_DIR = Path.home() / ".openclaw" / "sentinel-runtime"
 
 
 def _run(
@@ -268,6 +269,26 @@ def _prompt_secret(question: str) -> str:
     return value
 
 
+def _load_hf_token_from_repo_env() -> str:
+    env_path = REPO_ROOT / ".env"
+    if not env_path.exists():
+        return ""
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() != "HF_TOKEN":
+                continue
+            token = value.strip().strip('"').strip("'")
+            if token:
+                return token
+    except Exception:
+        return ""
+    return ""
+
+
 def _resolve_enable_choice(args: argparse.Namespace) -> bool:
     if args.enable_sentinel == "yes":
         return True
@@ -287,6 +308,9 @@ def _resolve_hf_token(args: argparse.Namespace, *, enable_sentinel: bool) -> str
     env_token = str(os.environ.get("HF_TOKEN", "")).strip()
     if env_token:
         return env_token
+    repo_env_token = _load_hf_token_from_repo_env()
+    if repo_env_token:
+        return repo_env_token
 
     if args.non_interactive:
         return ""
@@ -300,6 +324,42 @@ def _resolve_hf_token(args: argparse.Namespace, *, enable_sentinel: bool) -> str
     if not wants:
         return ""
     return _prompt_secret("Enter HF_TOKEN")
+
+
+def _resolve_runtime_python_path(runtime_dir: Path) -> Path:
+    if os.name == "nt":
+        return runtime_dir / "Scripts" / "python.exe"
+    return runtime_dir / "bin" / "python"
+
+
+def _ensure_prompt_guard_runtime(*, hf_token: str = "") -> Path:
+    runtime_python = _resolve_runtime_python_path(SENTINEL_RUNTIME_DIR)
+    if not runtime_python.exists():
+        print(f"Creating Sentinel Prompt Guard runtime at {SENTINEL_RUNTIME_DIR}...")
+        rc = _run([sys.executable, "-m", "venv", str(SENTINEL_RUNTIME_DIR)], check=False)
+        if rc != 0:
+            print(
+                "Warning: failed to create dedicated Sentinel runtime. "
+                "Falling back to installer Python.",
+                file=sys.stderr,
+            )
+            return Path(sys.executable)
+    env = os.environ.copy()
+    if str(hf_token).strip():
+        env["HF_TOKEN"] = str(hf_token).strip()
+    print("Installing Prompt Guard runtime dependencies (transformers, torch)...")
+    deps_rc = _run(
+        [str(runtime_python), "-m", "pip", "install", "-U", "transformers", "torch"],
+        env=env,
+        check=False,
+    )
+    if deps_rc != 0:
+        print(
+            "Warning: failed to install Prompt Guard dependencies in dedicated runtime. "
+            "Injection guard may run fail-closed until dependencies are fixed.",
+            file=sys.stderr,
+        )
+    return runtime_python
 
 
 def _run_sentinel_helper(sentinel_network: str) -> int:
@@ -388,7 +448,7 @@ def _install_preexec_plugin() -> Path:
     return plugin_dst
 
 
-def _install_injection_guard_plugin(*, hf_token: str = "") -> Path:
+def _install_injection_guard_plugin(*, hf_token: str = "", bridge_python: Optional[Path] = None) -> Path:
     if not INJECTION_GUARD_PLUGIN_SRC.exists():
         raise RuntimeError(f"Missing injection guard plugin source: {INJECTION_GUARD_PLUGIN_SRC}")
 
@@ -406,7 +466,7 @@ def _install_injection_guard_plugin(*, hf_token: str = "") -> Path:
             "llamaGuardModel": "llama-guard3",
             "promptGuardBridgeEnabled": True,
             "promptGuardBridgeScript": str(PROMPT_GUARD_BRIDGE),
-            "promptGuardBridgePython": sys.executable,
+            "promptGuardBridgePython": str(bridge_python or Path(sys.executable)),
             "failMode": "closed",
             "riskyTools": ["exec", "process", "write", "edit", "apply_patch"],
             "strictTools": [
@@ -590,6 +650,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if helper_rc != 0:
                 return helper_rc
             hf_token = _resolve_hf_token(args, enable_sentinel=True)
+            bridge_python = _ensure_prompt_guard_runtime(hf_token=hf_token)
             print("Applying secure OpenClaw exec-approval defaults...")
             approvals_rc = _apply_secure_exec_approvals()
             if approvals_rc != 0:
@@ -601,7 +662,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 return approvals_rc
             plugin_path = _install_preexec_plugin()
             print(f"Installed Sentinel pre-exec interception plugin: {plugin_path}")
-            injection_plugin_path = _install_injection_guard_plugin(hf_token=hf_token)
+            injection_plugin_path = _install_injection_guard_plugin(
+                hf_token=hf_token,
+                bridge_python=bridge_python,
+            )
             print(f"Installed Sentinel injection guard plugin: {injection_plugin_path}")
             _run(["openclaw", "gateway", "restart"], check=False)
             try:
