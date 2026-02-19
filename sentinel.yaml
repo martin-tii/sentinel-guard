@@ -7,6 +7,7 @@ blocked_paths:
 allowed_commands:
   - "echo"
   - "ls"
+  - "ps"
 
 host_match_mode: "exact"  # exact | subdomain
 allowed_hosts:
