@@ -43,6 +43,7 @@ This runtime is wired into OpenClaw plugin config (`promptGuardBridgePython`) so
 OpenClaw popup/alert behavior (what users see) is documented in:
 - [docs/README.md#approval-ui](docs/README.md#approval-ui)
 - [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
+- Includes Telegram-native approval broker setup for remote channels.
 
 To verify your live OpenClaw isolation topology and proxy-only egress path:
 

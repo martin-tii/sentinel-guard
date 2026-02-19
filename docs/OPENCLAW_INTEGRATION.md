@@ -347,6 +347,52 @@ For remote/headless channels where local popup/TTY approval may be unavailable (
 
 This avoids false hard-blocks caused only by missing approval UI, while still logging the decision path in gateway logs.
 
+### Telegram Native Approval Broker
+
+Sentinel pre-exec can send approval requests to Telegram with inline `Allow` / `Block` buttons.
+
+Security model:
+- Uses signed callback payloads (HMAC) and one-time approval IDs.
+- Supports approver user allowlist (`approverUserIds`).
+- Supports fixed approval chat binding (`chatId`).
+- Timeout still applies; normal fallback behavior is used if no decision is received.
+
+Important:
+- Use a dedicated approval bot token (separate from OpenClaw channel bot token).
+- If the same token is shared with OpenClaw channel polling, Telegram update streams can conflict.
+
+Plugin config example:
+
+```json
+{
+  "enabled": true,
+  "config": {
+    "tools": ["exec", "process", "write", "edit", "apply_patch", "browser"],
+    "timeoutSeconds": 45,
+    "fallback": "allow",
+    "telegramApproval": {
+      "enabled": true,
+      "botToken": "123456:ABCDEF...",
+      "chatId": "131771932",
+      "approverUserIds": [131771932],
+      "signingSecret": "replace-with-long-random-secret",
+      "pollIntervalMs": 1500
+    }
+  }
+}
+```
+
+Equivalent environment variables:
+
+```bash
+export SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_ENABLED="1"
+export SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_BOT_TOKEN="123456:ABCDEF..."
+export SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_CHAT_ID="131771932"
+export SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_USER_IDS="131771932"
+export SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_SIGNING_SECRET="replace-with-long-random-secret"
+export SENTINEL_OPENCLAW_TELEGRAM_POLL_INTERVAL_MS="1500"
+```
+
 ### Popup Guard Fallback
 
 The log-based popup guard remains installed as fallback defense-in-depth.

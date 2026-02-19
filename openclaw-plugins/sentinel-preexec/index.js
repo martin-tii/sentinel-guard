@@ -1,10 +1,12 @@
 import readline from "node:readline";
 import { spawn } from "node:child_process";
+import { createHmac, randomBytes } from "node:crypto";
 
 const DEFAULT_RISKY_TOOLS = ["exec", "process", "write", "edit", "apply_patch"];
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const DEFAULT_DECISION_COOLDOWN_SECONDS = 15;
 const DEFAULT_MAX_PROCESS_POLLS_PER_SESSION = 2;
+const DEFAULT_TELEGRAM_POLL_INTERVAL_MS = 1500;
 
 export function toToolSet(raw) {
   if (!Array.isArray(raw)) return null;
@@ -252,6 +254,251 @@ function runCommand(cmd, args, timeoutMs) {
   });
 }
 
+export function parseNumericIdSet(raw) {
+  if (Array.isArray(raw)) {
+    const values = raw.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+    return new Set(values);
+  }
+  const text = String(raw || "").trim();
+  if (!text) return new Set();
+  return new Set(
+    text
+      .split(",")
+      .map((v) => Number(v.trim()))
+      .filter((v) => Number.isFinite(v)),
+  );
+}
+
+function resolveTelegramApprovalConfig(pluginConfig) {
+  const cfg = pluginConfig?.telegramApproval || {};
+  const enabledCfg = cfg.enabled;
+  const enabledEnv = String(process.env.SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_ENABLED || "")
+    .trim()
+    .toLowerCase();
+  const enabled =
+    enabledCfg === true ||
+    enabledEnv === "1" ||
+    enabledEnv === "true" ||
+    enabledEnv === "yes" ||
+    enabledEnv === "on";
+  if (!enabled) return { enabled: false, ready: false };
+
+  const botToken = String(
+    cfg.botToken || process.env.SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_BOT_TOKEN || "",
+  ).trim();
+  const chatId = String(cfg.chatId || process.env.SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_CHAT_ID || "").trim();
+  const signingSecret = String(
+    cfg.signingSecret || process.env.SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_SIGNING_SECRET || "",
+  ).trim();
+  const approverUserIds = parseNumericIdSet(
+    cfg.approverUserIds || process.env.SENTINEL_OPENCLAW_TELEGRAM_APPROVAL_USER_IDS || "",
+  );
+  const apiBase = String(cfg.apiBase || process.env.SENTINEL_OPENCLAW_TELEGRAM_API_BASE || "https://api.telegram.org").trim();
+  const pollIntervalMsRaw = Number(cfg.pollIntervalMs ?? process.env.SENTINEL_OPENCLAW_TELEGRAM_POLL_INTERVAL_MS ?? "");
+  const pollIntervalMs =
+    Number.isFinite(pollIntervalMsRaw) && pollIntervalMsRaw >= 250
+      ? Math.floor(pollIntervalMsRaw)
+      : DEFAULT_TELEGRAM_POLL_INTERVAL_MS;
+
+  if (!botToken || !chatId || !signingSecret) {
+    return {
+      enabled: true,
+      ready: false,
+      reason:
+        "telegram approval enabled but missing botToken/chatId/signingSecret (use dedicated approval bot token)",
+    };
+  }
+  return {
+    enabled: true,
+    ready: true,
+    botToken,
+    chatId,
+    signingSecret,
+    approverUserIds,
+    apiBase,
+    pollIntervalMs,
+  };
+}
+
+export function signTelegramApproval(approvalId, decision, signingSecret) {
+  return createHmac("sha256", String(signingSecret))
+    .update(`${String(approvalId)}|${String(decision)}`)
+    .digest("hex")
+    .slice(0, 12);
+}
+
+export function buildTelegramCallbackData(approvalId, decision, signingSecret) {
+  const mode = decision === "allow" ? "a" : "b";
+  const sig = signTelegramApproval(approvalId, decision, signingSecret);
+  return `sg2|${mode}|${approvalId}|${sig}`;
+}
+
+export function parseTelegramCallbackData(raw) {
+  const text = String(raw || "").trim();
+  const m = text.match(/^sg2\|(a|b)\|([a-f0-9]{12})\|([a-f0-9]{12})$/);
+  if (!m) return null;
+  const mode = m[1] === "a" ? "allow" : "block";
+  return { decision: mode, approvalId: m[2], sig: m[3] };
+}
+
+async function sleepMs(delayMs) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function telegramApiRequest(cfg, method, payload, timeoutMs) {
+  const endpoint = `${cfg.apiBase.replace(/\/+$/, "")}/bot${cfg.botToken}/${method}`;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), Math.max(500, timeoutMs));
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+      signal: ctl.signal,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body?.ok !== true) {
+      const reason = String(body?.description || `HTTP ${res.status}`);
+      return { ok: false, reason };
+    }
+    return { ok: true, result: body.result };
+  } catch (err) {
+    return { ok: false, reason: String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const telegramOffsets = new Map();
+
+function normalizeChatId(value) {
+  return String(value == null ? "" : value).trim();
+}
+
+async function telegramDecision(toolName, timeoutMs, hint = "", sessionKey = "global", pluginConfig = {}, logger = null) {
+  const cfg = resolveTelegramApprovalConfig(pluginConfig);
+  if (!cfg.enabled) return null;
+  if (!cfg.ready) {
+    logger?.warn?.(`sentinel-preexec: ${cfg.reason}`);
+    return null;
+  }
+
+  const approvalId = randomBytes(6).toString("hex");
+  const allowData = buildTelegramCallbackData(approvalId, "allow", cfg.signingSecret);
+  const blockData = buildTelegramCallbackData(approvalId, "block", cfg.signingSecret);
+  const message = [
+    `Sentinel approval required`,
+    `Session: ${sessionKey}`,
+    `Tool: ${toolName}`,
+    hint ? `Hint: ${hint}` : "",
+    `Approval ID: ${approvalId}`,
+    `Timeout: ${Math.floor(timeoutMs / 1000)}s`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const sendResult = await telegramApiRequest(
+    cfg,
+    "sendMessage",
+    {
+      chat_id: cfg.chatId,
+      text: message,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "Allow", callback_data: allowData },
+          { text: "Block", callback_data: blockData },
+        ]],
+      },
+      disable_web_page_preview: true,
+    },
+    Math.min(5000, timeoutMs),
+  );
+  if (!sendResult.ok) {
+    logger?.warn?.(`sentinel-preexec: telegram approval send failed (${sendResult.reason})`);
+    return null;
+  }
+
+  const startedAt = Date.now();
+  let offset = telegramOffsets.get(cfg.botToken);
+  while (Date.now() - startedAt < timeoutMs) {
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
+    const pollSeconds = Math.max(1, Math.min(10, Math.floor(remainingMs / 1000)));
+    const poll = await telegramApiRequest(
+      cfg,
+      "getUpdates",
+      {
+        offset,
+        timeout: pollSeconds,
+        allowed_updates: ["callback_query"],
+      },
+      remainingMs + 1500,
+    );
+    if (!poll.ok) {
+      logger?.warn?.(`sentinel-preexec: telegram approval poll failed (${poll.reason})`);
+      await sleepMs(cfg.pollIntervalMs);
+      continue;
+    }
+    const updates = Array.isArray(poll.result) ? poll.result : [];
+    for (const update of updates) {
+      if (Number.isFinite(update?.update_id)) {
+        offset = Number(update.update_id) + 1;
+      }
+      const cb = update?.callback_query;
+      if (!cb) continue;
+      const parsed = parseTelegramCallbackData(cb?.data);
+      if (!parsed || parsed.approvalId !== approvalId) continue;
+      const expectedSig = signTelegramApproval(parsed.approvalId, parsed.decision, cfg.signingSecret);
+      if (parsed.sig !== expectedSig) {
+        await telegramApiRequest(cfg, "answerCallbackQuery", {
+          callback_query_id: cb.id,
+          text: "Invalid signature",
+          show_alert: true,
+        }, 3000);
+        continue;
+      }
+      const fromUserId = Number(cb?.from?.id);
+      if (cfg.approverUserIds.size > 0 && !cfg.approverUserIds.has(fromUserId)) {
+        await telegramApiRequest(cfg, "answerCallbackQuery", {
+          callback_query_id: cb.id,
+          text: "You are not an approved operator.",
+          show_alert: true,
+        }, 3000);
+        continue;
+      }
+      const cbChatId = normalizeChatId(cb?.message?.chat?.id);
+      if (cbChatId && normalizeChatId(cfg.chatId) !== cbChatId) {
+        await telegramApiRequest(cfg, "answerCallbackQuery", {
+          callback_query_id: cb.id,
+          text: "Approval came from unexpected chat.",
+          show_alert: true,
+        }, 3000);
+        continue;
+      }
+      await telegramApiRequest(cfg, "answerCallbackQuery", {
+        callback_query_id: cb.id,
+        text: parsed.decision === "allow" ? "Approved" : "Blocked",
+      }, 3000);
+      try {
+        const chatIdForEdit = cb?.message?.chat?.id;
+        const msgId = cb?.message?.message_id;
+        if (chatIdForEdit != null && msgId != null) {
+          await telegramApiRequest(
+            cfg,
+            "editMessageReplyMarkup",
+            { chat_id: chatIdForEdit, message_id: msgId, reply_markup: { inline_keyboard: [] } },
+            3000,
+          );
+        }
+      } catch {}
+      telegramOffsets.set(cfg.botToken, offset);
+      return parsed.decision;
+    }
+    telegramOffsets.set(cfg.botToken, offset);
+    await sleepMs(cfg.pollIntervalMs);
+  }
+  return null;
+}
+
 async function popupDecision(toolName, timeoutMs, hint = "") {
   const detail = hint ? `\n${hint}` : "";
   const msg = `Sentinel: allow OpenClaw tool '${toolName}'?${detail}`;
@@ -327,9 +574,9 @@ async function terminalDecision(toolName, timeoutMs, hint = "") {
   });
 }
 
-async function firstDecision(toolName, timeoutMs, hint = "") {
+async function firstDecision(toolName, timeoutMs, hint = "", sessionKey = "global", pluginConfig = {}, logger = null) {
   return await new Promise((resolve) => {
-    let pending = 2;
+    let pending = 3;
     let done = false;
     const finish = (value) => {
       if (done) return;
@@ -347,6 +594,9 @@ async function firstDecision(toolName, timeoutMs, hint = "") {
     };
     popupDecision(toolName, timeoutMs, hint).then(onResult).catch(() => onResult(null));
     terminalDecision(toolName, timeoutMs, hint).then(onResult).catch(() => onResult(null));
+    telegramDecision(toolName, timeoutMs, hint, sessionKey, pluginConfig, logger)
+      .then(onResult)
+      .catch(() => onResult(null));
     setTimeout(() => finish(null), timeoutMs + 500);
   });
 }
@@ -406,7 +656,14 @@ export default function register(api) {
     const timeoutMs = resolveTimeoutMs(api.pluginConfig || {});
     const fallback = resolveFallback(api.pluginConfig || {});
     const hint = inferToolHint(event, toolName);
-    const userDecision = await firstDecision(toolName, timeoutMs, hint);
+    const userDecision = await firstDecision(
+      toolName,
+      timeoutMs,
+      hint,
+      sessionKey,
+      api.pluginConfig || {},
+      api.logger,
+    );
     const decision = userDecision || fallback;
     const path = userDecision ? "operator" : `fallback:${fallback}`;
     api.logger?.info?.(

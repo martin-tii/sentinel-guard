@@ -11,7 +11,25 @@
         "items": { "type": "string" }
       },
       "timeoutSeconds": { "type": "number", "minimum": 1, "maximum": 600 },
-      "fallback": { "type": "string", "enum": ["allow", "block"] }
+      "fallback": { "type": "string", "enum": ["allow", "block"] },
+      "decisionCooldownSeconds": { "type": "number", "minimum": 0, "maximum": 3600 },
+      "maxProcessPollsPerSession": { "type": "number", "minimum": 0, "maximum": 50 },
+      "telegramApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "botToken": { "type": "string" },
+          "chatId": { "type": "string" },
+          "approverUserIds": {
+            "type": "array",
+            "items": { "type": "number" }
+          },
+          "signingSecret": { "type": "string" },
+          "apiBase": { "type": "string" },
+          "pollIntervalMs": { "type": "number", "minimum": 250, "maximum": 10000 }
+        }
+      }
     }
   }
 }
