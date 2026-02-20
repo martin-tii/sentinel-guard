@@ -226,6 +226,10 @@ def _default_approval_mode() -> str:
     return mode
 
 
+def _truthy(value: str) -> bool:
+    return str(value).strip().lower() in ("true", "1", "yes", "on")
+
+
 def _platform_popup_available() -> bool:
     if sys.platform == "darwin":
         return shutil.which("osascript") is not None
@@ -246,6 +250,7 @@ def _can_try_tkinter_popup() -> bool:
 
 def _resolve_default_handler() -> Optional[ApprovalHandler]:
     mode = _default_approval_mode()
+    interactive_tty = bool(getattr(sys.stdin, "isatty", lambda: False)())
     if mode == "reject":
         return None
     if mode == "popup":
@@ -257,16 +262,20 @@ def _resolve_default_handler() -> Optional[ApprovalHandler]:
     if mode == "tkinter":
         return tkinter_approval_handler
     if mode == "console":
-        if getattr(sys.stdin, "isatty", lambda: False)():
+        if interactive_tty:
             return console_approval_handler
         return None
 
     # auto mode: native popup first, tkinter fallback, then console.
+    allow_headless_popup = _truthy(os.environ.get("SENTINEL_ALLOW_HEADLESS_POPUP", ""))
+    if not interactive_tty and not allow_headless_popup:
+        return None
+
     if _platform_popup_available():
         return native_popup_approval_handler
     if _can_try_tkinter_popup():
         return tkinter_approval_handler
-    if getattr(sys.stdin, "isatty", lambda: False)():
+    if interactive_tty:
         return console_approval_handler
     return None
 
@@ -545,14 +554,6 @@ def request_user_approval(alert: SecurityAlert) -> bool:
     Uses registered handler to decide whether a blocked action can proceed.
     Defaults to reject when no handler is configured.
     """
-    if _is_always_allow(alert):
-        audit(
-            "SECURITY_ALERT",
-            f"{alert.action} -> {alert.target} | auto-approved by saved 'always allow' rule",
-            "APPROVED",
-        )
-        return True
-
     handler = get_approval_handler()
     default_mode = _default_approval_mode()
     using_default_handler = False
@@ -567,6 +568,14 @@ def request_user_approval(alert: SecurityAlert) -> bool:
             "REJECTED",
         )
         return False
+
+    if _is_always_allow(alert):
+        audit(
+            "SECURITY_ALERT",
+            f"{alert.action} -> {alert.target} | auto-approved by saved 'always allow' rule",
+            "APPROVED",
+        )
+        return True
 
     _enter_approval_prompt()
     try:

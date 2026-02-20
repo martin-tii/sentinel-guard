@@ -35,7 +35,7 @@ judge:
   fail_open: false
   prompt_guard:
     enabled: true
-    model: "meta-llama/Prompt-Guard-86M"
+    model: "meta-llama/Llama-Prompt-Guard-2-86M"
     threshold: 0.8
     fail_open: false
   injection_scan:

@@ -39,6 +39,7 @@ In production mode, `sentinel-isolate` enforces `--network none` unless
 - Docker Compose v2 (`docker compose`)
 - For Prompt Guard bridge in containerized OpenClaw integrations:
   - `HF_TOKEN` with access to `meta-llama/Llama-Prompt-Guard-2-86M`
+  - `huggingface-cli login` is an alternative for host-side authenticated environments
   - ML runtime dependencies inside image (`transformers` + `torch`)
   - For host-side installer flow, `python scripts/install_openclaw_with_sentinel.py --hf-token "$HF_TOKEN"` or export `HF_TOKEN` before running installer
 

@@ -39,7 +39,7 @@ judge_config.setdefault("fail_open", False)
 prompt_guard_cfg = judge_config.setdefault("prompt_guard", {})
 if isinstance(prompt_guard_cfg, dict):
     prompt_guard_cfg.setdefault("enabled", True)
-    prompt_guard_cfg.setdefault("model", "meta-llama/Prompt-Guard-86M")
+    prompt_guard_cfg.setdefault("model", "meta-llama/Llama-Prompt-Guard-2-86M")
     prompt_guard_cfg.setdefault("threshold", 0.8)
     prompt_guard_cfg.setdefault("fail_open", False)
 

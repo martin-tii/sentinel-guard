@@ -48,10 +48,18 @@ class ApprovalDefaultModeTests(unittest.TestCase):
         with mock.patch.object(approval, "_save_always_allow_rules"):
             with mock.patch.object(approval.builtins, "input", return_value="2"):
                 self.assertTrue(approval.console_approval_handler(self._alert()))
-        # Subsequent request should auto-approve with no prompt.
+        # Reject mode with no handler remains fail-closed, even with saved allow rules.
         os.environ["SENTINEL_APPROVAL_MODE"] = "reject"
-        with mock.patch.object(approval, "_resolve_default_handler", side_effect=AssertionError("unexpected prompt")):
-            self.assertTrue(request_user_approval(self._alert()))
+        self.assertFalse(request_user_approval(self._alert()))
+
+    def test_always_allow_rule_applies_when_handler_available(self):
+        with mock.patch.object(approval, "_save_always_allow_rules"):
+            with mock.patch.object(approval.builtins, "input", return_value="2"):
+                self.assertTrue(approval.console_approval_handler(self._alert()))
+        os.environ["SENTINEL_APPROVAL_MODE"] = "console"
+        with mock.patch.object(sys.stdin, "isatty", return_value=True):
+            with mock.patch.object(approval, "console_approval_handler", side_effect=AssertionError("unexpected prompt")):
+                self.assertTrue(request_user_approval(self._alert()))
 
     def test_reject_mode_rejects_when_no_handler(self):
         os.environ["SENTINEL_APPROVAL_MODE"] = "reject"

@@ -21,6 +21,15 @@ test_file_access_deny_outside_workspace if {
   contains(lower(result.reason), "file")
 }
 
+test_file_access_deny_prefix_bypass_path if {
+  input := {
+    "action": {"type": "file_access", "target": "/workspace/project-evil/secret.txt"},
+    "context": {"workspace_root": "/workspace/project"},
+  }
+  result := authz.decision with input as input
+  result.allow == false
+}
+
 test_command_allow if {
   input := {
     "action": {"type": "command_exec", "target": "ls -la", "args": ["ls", "-la"]},

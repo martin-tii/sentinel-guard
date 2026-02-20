@@ -31,6 +31,8 @@ What you do NOT get:
   - Creates/uses `~/.openclaw/sentinel-runtime`
   - Installs `transformers` + `torch` there automatically
 - Hugging Face access for `meta-llama/Llama-Prompt-Guard-2-86M` (token required for gated access).
+  - Provide `HF_TOKEN` (or `huggingface-cli login`) where required.
+  - Manual `pip install transformers torch` is only needed for custom/manual runtime setups.
 
 ## Quickstart (Recommended)
 

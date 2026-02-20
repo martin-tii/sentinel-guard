@@ -13,7 +13,13 @@ normalize_path(value) := out if {
 }
 
 is_subpath(path, root) if {
-  startswith(path, root)
+  p := normalize_path(path)
+  r := normalize_path(root)
+  p == r
+} else if {
+  p := normalize_path(path)
+  r := normalize_path(root)
+  startswith(p, sprintf("%s/", [r]))
 }
 
 host_matches_exact(host, allowed) if {

@@ -25,7 +25,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Sentinel Prompt Guard bridge (Transformers).")
     parser.add_argument("--text", required=True, help="Input text to classify.")
     parser.add_argument("--source", default="openclaw.bridge", help="Source label for audit context.")
-    parser.add_argument("--model", default="meta-llama/Prompt-Guard-86M", help="HF model id.")
+    parser.add_argument("--model", default="meta-llama/Llama-Prompt-Guard-2-86M", help="HF model id.")
     parser.add_argument("--threshold", type=float, default=0.8, help="Suspicion threshold.")
     parser.add_argument("--max-length", type=int, default=512, help="Max tokenized length.")
     parser.add_argument("--fail-open", action="store_true", help="Return safe on model load/infer errors.")

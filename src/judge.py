@@ -6,7 +6,7 @@ class PromptGuardDetector:
     def __init__(self, config=None):
         self.config = config or {}
         self.enabled = bool(self.config.get("enabled", False))
-        self.model = self.config.get("model", "meta-llama/Prompt-Guard-86M")
+        self.model = self.config.get("model", "meta-llama/Llama-Prompt-Guard-2-86M")
         self.threshold = float(self.config.get("threshold", 0.8))
         self.fail_open = bool(self.config.get("fail_open", False))
         self.max_length = int(self.config.get("max_length", 512))
