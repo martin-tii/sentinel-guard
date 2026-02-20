@@ -202,15 +202,11 @@ graph TD
 - Quickstart: [docs/QUICKSTART.md](docs/QUICKSTART.md)
 - Usage modes: [docs/USAGE_MODES.md](docs/USAGE_MODES.md)
 - Configuration and env vars: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- Validation matrix: [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md)
 - Deployment hardening: [DEPLOYMENT.md](DEPLOYMENT.md)
 - Security posture: [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md)
 - OpenClaw integration: [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
 - Integrity/performance benchmark: [scripts/benchmark_integrity.py](scripts/benchmark_integrity.py)
-
-## Validation
-
-Validation mapping is centralized in [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md).
-Run `pytest -q` for full coverage.
 
 ## Development
 
