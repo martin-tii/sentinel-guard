@@ -48,12 +48,12 @@ Detailed architecture diagrams and decision flow are in [docs/README.md](docs/RE
 ```mermaid
 graph TD
     subgraph Host ["Host Machine"]
-        style Host fill:#f9f9f9,stroke:#333
+        style Host fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
 
         User((User)) -->|Run| CLI["Sentinel CLI"]
 
         subgraph Sandbox ["🛡️ Secure Sandbox (Docker)"]
-            style Sandbox fill:#ffffff,stroke:#333,stroke-width:2px
+            style Sandbox fill:#111827,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
 
             Agent["🤖 Agent Process"]
             Hooks["🪝 Sentinel Hooks"]
@@ -63,23 +63,34 @@ graph TD
         end
 
         subgraph Models ["Intelligence Layer"]
-            style Models fill:#e3f2fd,stroke:#2980b9
+            style Models fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
             PG["🛡️ Prompt Guard\n(Injection Detector)"]
             Judge["🧠 AI Judge\n(Llama Guard)"]
         end
 
         Proxy["🚦 Sidecar Proxy"]
+        Internet((☁️ Internet))
 
         %% Connections
         Hooks -->|Text Check| PG
         Hooks -->|Intent Check| Judge
         Hooks -->|Traffic| Proxy
-
-        Proxy --> Internet((☁️ Internet))
+        Proxy --> Internet
     end
 
-    %% Styling
-    linkStyle default stroke-width:2px,fill:none;
+    %% Node styles
+    style User fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style CLI fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style Agent fill:#0b1220,stroke:#a78bfa,stroke-width:2px,color:#f8fafc
+    style Hooks fill:#0b1220,stroke:#22c55e,stroke-width:2px,color:#f8fafc
+    style Kernel fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+    style PG fill:#0b1220,stroke:#22c55e,stroke-width:2px,color:#f8fafc
+    style Judge fill:#0b1220,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style Proxy fill:#0b1220,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
+    style Internet fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
+
+    %% Link styling
+    linkStyle default stroke:#94a3b8,stroke-width:2px,fill:none;
 ```
 
 ## Documentation Map
