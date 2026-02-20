@@ -209,22 +209,8 @@ graph TD
 
 ## Validation
 
-- Isolation runner hardening/proxy/seccomp claims.
-  - Validation: Tested by `tests/test_isolation.py::IsolationCommandBuildTests`.
-- Compatibility-mode approval behavior and fail-safe modes.
-  - Validation: Tested by `tests/test_approval.py::ApprovalDefaultModeTests`.
-- Prompt Guard + injection scan behavior for input/file/network sources.
-  - Validation: Tested by `tests/test_injection_scan.py::InjectionScanTests`.
-- AI Judge risk-threshold and fail-open/fail-closed adjudication.
-  - Validation: Tested by `tests/test_judge.py::AIJudgeRuntimeTests`.
-- Runtime tamper detection and policy integrity checks.
-  - Validation: Tested by `tests/test_integrity.py::RuntimeTamperDetectionTests`, `tests/test_integrity.py::PolicyIntegrityTests`, `tests/test_integrity.py::IntegritySchedulingAndAttestationTests`.
-- Production integrity/network controls.
-  - Validation: Tested by `tests/test_production_controls.py::ProductionPolicyIntegrityTests`, `tests/test_production_controls.py::ProductionIsolationNetworkTests`.
-- OpenClaw installer/hardening flow claims.
-  - Validation: Tested by `tests/test_install_openclaw_with_sentinel.py::InstallOpenClawWithSentinelTests`, `tests/test_openclaw_sandbox_configure.py::OpenClawSandboxConfigureTests`, `tests/test_openclaw_popup_guard.py::OpenClawPopupGuardTests`, `tests/test_openclaw_isolation.py::OpenClawIsolationTests`.
-- Security architecture prose and deployment recommendations in this page.
-  - Validation: Non-executable rationale.
+Validation mapping is centralized in [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md).
+Run `pytest -q` for full coverage.
 
 ## Development
 

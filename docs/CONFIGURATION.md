@@ -68,6 +68,13 @@ network_failsafe:
   blocked_hosts: []
   blocked_ips: []
   allowed_ips: []
+
+opa:
+  enabled: true
+  url: "http://127.0.0.1:8181"
+  decision_path: "/v1/data/sentinel/authz/decision"
+  timeout_ms: 1500
+  fail_mode: "deny"   # deny | allow
 ```
 
 ## Common Policy Profiles
@@ -86,6 +93,7 @@ Use these as quick starting points, then expand with the full policy schema abov
 - `allowed_hosts`: explicit allowlist only
 - `network_failsafe.socket_connect: true`
 - `network_failsafe.allow_private_network: false`
+- `opa.enabled: true` with reachable `opa.url`
 - Run via proxied compose topology (sidecar + internal network), not only bridge proxy env vars
 
 ### 3) Compatibility Mode with Approval Defaults
@@ -139,6 +147,16 @@ export SENTINEL_NO_PROXY=localhost,127.0.0.1,.svc.cluster.local
 export SENTINEL_ENFORCE_PROXY=true
 ```
 
+### OPA Controls
+
+```bash
+export SENTINEL_OPA_ENABLED=true
+export SENTINEL_OPA_URL=http://127.0.0.1:8181
+export SENTINEL_OPA_DECISION_PATH=/v1/data/sentinel/authz/decision
+export SENTINEL_OPA_TIMEOUT_MS=1500
+export SENTINEL_OPA_FAIL_MODE=deny  # deny | allow
+```
+
 ## Notes
 
 - In production mode, signed + immutable policy settings are required.
@@ -150,17 +168,5 @@ export SENTINEL_ENFORCE_PROXY=true
 
 ## Validation
 
-- Host matching modes, scheme/port constraints, and socket policy checks.
-  - Validation: Tested by `tests/test_network_policy.py::NetworkPolicyTests`.
-- Dual-control disable requirement.
-  - Validation: Tested by `tests/test_security_controls.py::SecurityControlTests`.
-- Policy integrity env controls (`SENTINEL_POLICY_SHA256`, immutable drift checks, production requirements).
-  - Validation: Tested by `tests/test_integrity.py::PolicyIntegrityTests`, `tests/test_production_controls.py::ProductionPolicyIntegrityTests`.
-- Production network exception control (`SENTINEL_ALLOW_NETWORK_IN_PRODUCTION`).
-  - Validation: Tested by `tests/test_production_controls.py::ProductionIsolationNetworkTests`.
-- Runtime tuning controls for tamper-check cadence and attestation emission.
-  - Validation: Tested by `tests/test_integrity.py::IntegritySchedulingAndAttestationTests`.
-- Prompt Guard/injection scan defaults and detection modes.
-  - Validation: Tested by `tests/test_injection_scan.py::InjectionScanTests`, `tests/test_judge.py::PromptGuardDetectorTests`.
-- Profile guidance text and risk commentary.
-  - Validation: Non-executable rationale.
+Validation mapping is centralized in [VALIDATION_MATRIX.md](./VALIDATION_MATRIX.md).
+Run `pytest -q` for full coverage.

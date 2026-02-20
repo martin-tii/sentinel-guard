@@ -25,12 +25,13 @@ In production mode, `sentinel-isolate` enforces `--network none` unless
 ## Files
 
 - `Dockerfile`: builds the Sentinel runtime image
-- `docker-compose.yml`: hardened run profiles (`standard`, `strict`, `proxied`)
+- `docker-compose.yml`: hardened run profiles (`standard`, `strict`, `proxied`, `proxied-single`)
 - `seccomp/sentinel-seccomp.json`: additional syscall deny rules
 - `seccomp/sentinel-seccomp-datasci.json`: broader syscall profile for ML/data workloads
 - `proxy/squid.conf`: sidecar proxy config for proxied profile
 - `proxy/allowed-domains.txt`: proxy domain allowlist
 - `scripts/entrypoint.sh`: ensures `/workspace` and default `sentinel.yaml` exist
+- `scripts/entrypoint_with_opa.sh`: boots embedded OPA in `proxied-single` mode
 
 ## Prerequisites
 
@@ -106,7 +107,26 @@ flowchart LR
 docker compose --profile proxied up --build --abort-on-container-exit sentinel-proxied
 ```
 
-### 4) Isolated Arbitrary Command (Recommended for untrusted agents)
+This profile expects the OPA sidecar service to run on the same compose profile:
+
+```bash
+docker compose --profile proxied up -d opa
+```
+
+### 4) Proxied Single-Container OPA Mode
+
+Runs Sentinel with embedded OPA via `scripts/entrypoint_with_opa.sh` while keeping proxy topology.
+Use this when you need a single Sentinel container process model for policy decisions.
+
+```bash
+docker compose --profile proxied-single up --build --abort-on-container-exit sentinel-proxied-single
+```
+
+Operational note:
+- `proxied-single` is a convenience mode and currently uses a looser seccomp setting than strict hardened profiles.
+- For highest assurance, prefer `--profile proxied` with dedicated sidecars.
+
+### 5) Isolated Arbitrary Command (Recommended for untrusted agents)
 
 ```bash
 sentinel-isolate \
@@ -212,13 +232,5 @@ This catches non-`requests` clients via `socket.socket.connect`, but only has ho
 
 ## Validation
 
-- Container hardening flags and isolation command construction.
-  - Validation: Tested by `tests/test_isolation.py::IsolationCommandBuildTests`.
-- Production-mode network gating and signed/immutable policy prerequisites.
-  - Validation: Tested by `tests/test_production_controls.py::ProductionPolicyIntegrityTests`, `tests/test_production_controls.py::ProductionIsolationNetworkTests`.
-- Entry-point workspace/policy bootstrap behavior.
-  - Validation: Tested by `tests/test_entrypoint_script.py::EntrypointScriptTests`.
-- Demo startup script execution profile selection and command path.
-  - Validation: Tested by `tests/test_run_demo_script.py::RunDemoScriptTests`.
-- Compose topology and threat-model narrative in diagrams/notes.
-  - Validation: Non-executable rationale.
+Validation mapping is centralized in [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md).
+Run `pytest -q` for full coverage.

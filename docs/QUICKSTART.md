@@ -85,9 +85,5 @@ sentinel-isolate --seccomp-profile datasci --build-if-missing -- python your_age
 
 ## Validation
 
-- `run_demo.sh` strict-default and standard-mode command flow.
-  - Validation: Tested by `tests/test_run_demo_script.py::RunDemoScriptTests`.
-- `sentinel-isolate` hardening flags, seccomp profile/mode options, and proxy enforcement behavior.
-  - Validation: Tested by `tests/test_isolation.py::IsolationCommandBuildTests`.
-- Troubleshooting and operational advice text.
-  - Validation: Non-executable rationale.
+Validation mapping is centralized in [VALIDATION_MATRIX.md](./VALIDATION_MATRIX.md).
+Run `pytest -q` for full coverage.

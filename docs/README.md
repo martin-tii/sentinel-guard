@@ -21,6 +21,7 @@ Use this page as the documentation entry point.
 
 - Deployment hardening: [../DEPLOYMENT.md](../DEPLOYMENT.md)
 - Architecture overview (pillars of protection): [../README.md#architecture-pillars](../README.md#architecture-pillars)
+- Validation matrix (test-to-claim map): [VALIDATION_MATRIX.md](./VALIDATION_MATRIX.md)
 - Security posture and residual risks: [../SECURITY_ASSESSMENT.md](../SECURITY_ASSESSMENT.md)
 - OpenClaw integration: [OPENCLAW_INTEGRATION.md](./OPENCLAW_INTEGRATION.md)
   - Transparent installer step: `cd sentinel-guard && python scripts/install_openclaw_with_sentinel.py`
@@ -136,11 +137,5 @@ See:
 
 ## Validation
 
-- Entry-point command paths and recommended execution modes.
-  - Validation: Tested by `tests/test_run_demo_script.py::RunDemoScriptTests`, `tests/test_isolation.py::IsolationCommandBuildTests`, `tests/test_openclaw_isolation.py::OpenClawIsolationTests`.
-- Approval UI fallback behavior claims (popup and terminal alerts).
-  - Validation: Tested by `tests/test_openclaw_popup_guard.py::OpenClawPopupGuardTests`, `tests/test_approval.py::ApprovalDefaultModeTests`.
-- Decision pipeline controls (prompt, network, command, escalation).
-  - Validation: Tested by `tests/test_injection_scan.py::InjectionScanTests`, `tests/test_network_policy.py::NetworkPolicyTests`, `tests/test_judge.py::AIJudgeRuntimeTests`, `tests/test_approval.py::ApprovalDefaultModeTests`.
-- Architecture and guidance language in this page.
-  - Validation: Non-executable rationale.
+Validation mapping is centralized in [VALIDATION_MATRIX.md](./VALIDATION_MATRIX.md).
+Run `pytest -q` for full coverage.

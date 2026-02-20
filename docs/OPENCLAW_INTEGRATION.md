@@ -431,17 +431,5 @@ If a write slips through anyway:
 
 ## Validation
 
-- Installer fallback chain and non-interactive hardening behavior.
-  - Validation: Tested by `tests/test_install_openclaw_with_sentinel.py::InstallOpenClawWithSentinelTests`.
-- Sandbox configuration payload defaults and hardening fields.
-  - Validation: Tested by `tests/test_openclaw_sandbox_configure.py::OpenClawSandboxConfigureTests`.
-- Sentinel network override (`--sentinel-network` / `SENTINEL_OPENCLAW_DOCKER_NETWORK`) propagation.
-  - Validation: Tested by `tests/test_install_openclaw_with_sentinel.py::InstallOpenClawWithSentinelTests`, `tests/test_openclaw_sandbox_configure.py::OpenClawSandboxConfigureTests`.
-- Popup guard risky-tool detection, regex parsing, first-responder decision, timeout fail-safe, and dedupe/debounce behavior.
-  - Validation: Tested by `tests/test_openclaw_popup_guard.py::OpenClawPopupGuardTests`.
-- Pre-exec plugin risky-tool resolution and fallback controls.
-  - Validation: Tested by `openclaw-plugins/sentinel-preexec/tests/preexec.test.mjs`.
-- Injection guard heuristic detection, strict-tool enforcement helpers, and workspace-safe deletion path resolution.
-  - Validation: Tested by `openclaw-plugins/sentinel-injection-guard/tests/injection-guard.test.mjs`.
-- Version caveats and operational recommendations.
-  - Validation: Non-executable rationale.
+Validation mapping is centralized in [VALIDATION_MATRIX.md](./VALIDATION_MATRIX.md).
+Run `pytest -q` for full coverage.
