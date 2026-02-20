@@ -1,6 +1,13 @@
 # Configuration
 
-Policies are defined in `sentinel.yaml`.
+Runtime configuration is defined in `sentinel.yaml`.
+
+Authorization policy is defined in a single OPA Rego file:
+
+- `policies/rego/sentinel/authz.rego` (source of truth)
+
+When `opa.enabled: true`, Sentinel authorization decisions come from OPA.
+`sentinel.yaml` policy-like fields are legacy compatibility fallback only (used when OPA is disabled).
 
 ## Minimal Policy Example
 

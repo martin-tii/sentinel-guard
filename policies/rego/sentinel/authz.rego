@@ -1,7 +1,6 @@
 package sentinel.authz
 
 import rego.v1
-import data.sentinel.helpers
 
 default decision := {
   "allow": false,
@@ -45,7 +44,7 @@ decision := {
 }
 
 valid_input if {
-  helpers.is_nonempty_string(input.action.type)
+  is_nonempty_string(input.action.type)
 }
 
 allow_action if {
@@ -74,10 +73,10 @@ allow_action if {
 }
 
 allow_file_access if {
-  target := helpers.normalize_path(input.action.target)
-  root := helpers.normalize_path(input.context.workspace_root)
-  helpers.is_nonempty_string(root)
-  helpers.is_subpath(target, root)
+  target := normalize_path(input.action.target)
+  root := normalize_path(input.context.workspace_root)
+  is_nonempty_string(root)
+  is_subpath(target, root)
   not file_path_is_blocked(target)
 }
 
@@ -120,7 +119,7 @@ allow_network_http if {
 
 allow_socket_connect if {
   host := lower(sprintf("%v", [input.action.metadata.host]))
-  helpers.is_nonempty_string(host)
+  is_nonempty_string(host)
   port := to_number(input.action.metadata.port)
   host_rule_matches(host, "https", port)
 }
@@ -129,16 +128,16 @@ host_rule_matches(host, scheme, port) if {
   rule := allowed_hosts[_]
   host_matches_rule(host, rule)
   rule.schemes[scheme]
-  effective_port := object.get(input.action.metadata, "port", helpers.default_port(scheme))
+  effective_port := object.get(input.action.metadata, "port", default_port(scheme))
   numeric_port := to_number(effective_port)
   rule.ports[numeric_port]
 }
 
 host_matches_rule(host, rule) if {
   lower(rule.match) == "subdomain"
-  helpers.host_matches_subdomain(host, rule.host)
+  host_matches_subdomain(host, rule.host)
 } else if {
-  helpers.host_matches_exact(host, rule.host)
+  host_matches_exact(host, rule.host)
 }
 
 allow_tool_call if {
@@ -179,4 +178,36 @@ deny_reasons contains "Unknown action type" if {
   input.action.type != "network_http"
   input.action.type != "socket_connect"
   input.action.type != "tool_call"
+}
+
+is_nonempty_string(value) if {
+  is_string(value)
+  trim_space(value) != ""
+}
+
+default_port("http") := 80
+default_port("https") := 443
+
+normalize_path(value) := out if {
+  out := trim_space(sprintf("%v", [value]))
+}
+
+is_subpath(path, root) if {
+  p := normalize_path(path)
+  r := normalize_path(root)
+  p == r
+} else if {
+  p := normalize_path(path)
+  r := normalize_path(root)
+  startswith(p, sprintf("%s/", [r]))
+}
+
+host_matches_exact(host, allowed) if {
+  lower(host) == lower(allowed)
+}
+
+host_matches_subdomain(host, allowed) if {
+  lower(host) == lower(allowed)
+} else if {
+  endswith(lower(host), sprintf(".%s", [lower(allowed)]))
 }
