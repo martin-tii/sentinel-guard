@@ -46,6 +46,12 @@ cd sentinel-guard
 python scripts/install_openclaw_with_sentinel.py
 ```
 
+To also start/verify OPA policy sidecar during install:
+
+```bash
+python scripts/install_openclaw_with_sentinel.py --enable-opa yes
+```
+
 When Sentinel hardening is enabled, installer token resolution is:
 1. `--hf-token <token>`
 2. existing `HF_TOKEN` env var
@@ -74,6 +80,7 @@ openclaw sandbox list
 
 Expected outcome:
 - Hardened sandbox config + Sentinel proxy topology are applied for OpenClaw tool sandboxes.
+- OPA policy endpoint is available at `http://127.0.0.1:8181/v1/data/sentinel/authz/decision` when enabled.
 
 ## Non-Interactive / CI
 

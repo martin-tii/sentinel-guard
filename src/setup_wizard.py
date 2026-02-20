@@ -70,6 +70,13 @@ network_failsafe:
   blocked_hosts: []
   blocked_ips: []
   allowed_ips: []
+
+opa:
+  enabled: true
+  url: "http://127.0.0.1:8181"
+  decision_path: "/v1/data/sentinel/authz/decision"
+  timeout_ms: 1500
+  fail_mode: "deny"
 """
 
 

@@ -11,7 +11,12 @@
         "items": { "type": "string" }
       },
       "timeoutSeconds": { "type": "number", "minimum": 1, "maximum": 600 },
-      "fallback": { "type": "string", "enum": ["allow", "block"] }
+      "fallback": { "type": "string", "enum": ["allow", "block"] },
+      "opaEnabled": { "type": "boolean" },
+      "opaUrl": { "type": "string" },
+      "opaDecisionPath": { "type": "string" },
+      "opaTimeoutMs": { "type": "number", "minimum": 50, "maximum": 30000 },
+      "opaFailMode": { "type": "string", "enum": ["allow", "block"] }
     }
   }
 }

@@ -43,6 +43,13 @@ For official OpenClaw CLI workloads, use:
 sentinel-openclaw -- gateway --port 18789
 ```
 
+OPA-backed policy plane is enabled by default via `sentinel.yaml` (`opa.enabled: true`).
+Run local OPA for policy decisions:
+
+```bash
+docker compose --profile proxied up -d opa
+```
+
 For a transparent OpenClaw install/onboard flow with one extra Sentinel prompt, use:
 
 ```bash

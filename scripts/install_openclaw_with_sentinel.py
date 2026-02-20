@@ -111,6 +111,15 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--enable-opa",
+        choices=["yes", "no", "ask"],
+        default="ask",
+        help=(
+            "Whether to start and verify local OPA sidecar. "
+            "In --non-interactive mode, 'ask' is treated as 'no'."
+        ),
+    )
+    parser.add_argument(
         "--hf-token",
         default="",
         help=(
@@ -369,6 +378,30 @@ def _run_sentinel_helper(sentinel_network: str) -> int:
     return _run([sys.executable, str(SENTINEL_HELPER)], cwd=REPO_ROOT, env=env, check=False)
 
 
+def _resolve_opa_enable_choice(args: argparse.Namespace) -> bool:
+    if args.enable_opa == "yes":
+        return True
+    if args.enable_opa == "no":
+        return False
+    if args.non_interactive:
+        return False
+    return _prompt_yes_no("Start local OPA sidecar for policy decisions now?", default_yes=True)
+
+
+def _ensure_opa_sidecar_running() -> int:
+    rc = _run(
+        ["docker", "compose", "--profile", "proxied", "up", "-d", "opa"],
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    if rc != 0:
+        return rc
+    return _run(
+        ["curl", "-fsS", "http://127.0.0.1:8181/health?plugins"],
+        check=False,
+    )
+
+
 def build_default_exec_approvals() -> dict:
     # Force approval prompts for exec by default, with deny fallback.
     return {
@@ -433,6 +466,16 @@ def _install_preexec_plugin() -> Path:
     shutil.rmtree(plugin_dst, ignore_errors=True)
     shutil.copytree(PREEXEC_PLUGIN_SRC, plugin_dst)
 
+    entry_payload = {
+        "enabled": True,
+        "config": {
+            "opaEnabled": True,
+            "opaUrl": "http://127.0.0.1:8181",
+            "opaDecisionPath": "/v1/data/sentinel/authz/decision",
+            "opaTimeoutMs": 1500,
+            "opaFailMode": "block",
+        },
+    }
     _run(["openclaw", "config", "set", "--json", "plugins.enabled", "true"], check=False)
     _run(
         [
@@ -441,7 +484,7 @@ def _install_preexec_plugin() -> Path:
             "set",
             "--json",
             f"plugins.entries.{PREEXEC_PLUGIN_ID}",
-            '{"enabled":true}',
+            json.dumps(entry_payload, separators=(",", ":")),
         ],
         check=False,
     )
@@ -649,6 +692,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             helper_rc = _run_sentinel_helper(args.sentinel_network)
             if helper_rc != 0:
                 return helper_rc
+            if _resolve_opa_enable_choice(args):
+                print("Starting OPA sidecar...")
+                opa_rc = _ensure_opa_sidecar_running()
+                if opa_rc != 0:
+                    print(
+                        "Warning: failed to start or verify OPA sidecar. "
+                        "Sentinel OPA checks may fail closed until OPA is available.",
+                        file=sys.stderr,
+                    )
             hf_token = _resolve_hf_token(args, enable_sentinel=True)
             bridge_python = _ensure_prompt_guard_runtime(hf_token=hf_token)
             print("Applying secure OpenClaw exec-approval defaults...")

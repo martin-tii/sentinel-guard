@@ -437,6 +437,7 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
     @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
     @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
     @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
+    @patch("scripts.install_openclaw_with_sentinel._ensure_opa_sidecar_running")
     @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
     @patch("scripts.install_openclaw_with_sentinel._prompt_yes_no")
     @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
@@ -445,6 +446,7 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         installed_mock,
         prompt_mock,
         helper_mock,
+        opa_mock,
         approvals_mock,
         popup_guard_mock,
         injection_plugin_mock,
@@ -464,6 +466,36 @@ class InstallOpenClawWithSentinelTests(unittest.TestCase):
         popup_guard_mock.assert_called_once()
         injection_plugin_mock.assert_called_once()
         preexec_plugin_mock.assert_called_once()
+        opa_mock.assert_not_called()
+
+    @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
+    @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_injection_guard_plugin")
+    @patch("scripts.install_openclaw_with_sentinel._install_popup_guard_background")
+    @patch("scripts.install_openclaw_with_sentinel._apply_secure_exec_approvals")
+    @patch("scripts.install_openclaw_with_sentinel._ensure_opa_sidecar_running")
+    @patch("scripts.install_openclaw_with_sentinel._run_sentinel_helper")
+    @patch("scripts.install_openclaw_with_sentinel._is_openclaw_installed")
+    def test_enable_opa_yes_attempts_sidecar_start(
+        self,
+        installed_mock,
+        helper_mock,
+        opa_mock,
+        approvals_mock,
+        popup_guard_mock,
+        injection_plugin_mock,
+        preexec_plugin_mock,
+        _next_steps_mock,
+    ):
+        installed_mock.return_value = True
+        helper_mock.return_value = 0
+        opa_mock.return_value = 0
+        approvals_mock.return_value = 0
+
+        rc = main(["--non-interactive", "--enable-sentinel", "yes", "--enable-opa", "yes"])
+
+        self.assertEqual(rc, 0)
+        opa_mock.assert_called_once()
 
     @patch("scripts.install_openclaw_with_sentinel._print_next_steps")
     @patch("scripts.install_openclaw_with_sentinel._install_preexec_plugin")

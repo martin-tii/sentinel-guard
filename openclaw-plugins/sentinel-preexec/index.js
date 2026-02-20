@@ -5,6 +5,9 @@ const DEFAULT_RISKY_TOOLS = ["exec", "process", "write", "edit", "apply_patch"];
 const DEFAULT_TIMEOUT_SECONDS = 120;
 const DEFAULT_DECISION_COOLDOWN_SECONDS = 15;
 const DEFAULT_MAX_PROCESS_POLLS_PER_SESSION = 2;
+const DEFAULT_OPA_URL = "http://127.0.0.1:8181";
+const DEFAULT_OPA_DECISION_PATH = "/v1/data/sentinel/authz/decision";
+const DEFAULT_OPA_TIMEOUT_MS = 1500;
 
 export function toToolSet(raw) {
   if (!Array.isArray(raw)) return null;
@@ -56,6 +59,40 @@ export function resolveDecisionCooldownMs(pluginConfig) {
   const raw = Number(rawEnv);
   if (Number.isFinite(raw) && raw >= 0) return Math.floor(raw * 1000);
   return DEFAULT_DECISION_COOLDOWN_SECONDS * 1000;
+}
+
+export function resolveOpaConfig(pluginConfig) {
+  const enabledRaw = pluginConfig?.opaEnabled;
+  let enabled = true;
+  if (typeof enabledRaw === "boolean") {
+    enabled = enabledRaw;
+  } else if (process.env.SENTINEL_OPA_ENABLED != null) {
+    const envValue = String(process.env.SENTINEL_OPA_ENABLED).trim().toLowerCase();
+    enabled = envValue === "1" || envValue === "true" || envValue === "yes" || envValue === "on";
+  }
+
+  const opaUrl = String(pluginConfig?.opaUrl || process.env.SENTINEL_OPA_URL || DEFAULT_OPA_URL).trim();
+  const opaDecisionPath = String(
+    pluginConfig?.opaDecisionPath || process.env.SENTINEL_OPA_DECISION_PATH || DEFAULT_OPA_DECISION_PATH,
+  ).trim();
+
+  const timeoutRaw = Number(pluginConfig?.opaTimeoutMs ?? process.env.SENTINEL_OPA_TIMEOUT_MS ?? DEFAULT_OPA_TIMEOUT_MS);
+  const opaTimeoutMs = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? Math.floor(timeoutRaw) : DEFAULT_OPA_TIMEOUT_MS;
+
+  const failModeRaw = String(
+    pluginConfig?.opaFailMode || process.env.SENTINEL_OPENCLAW_OPA_FAIL_MODE || "block",
+  )
+    .trim()
+    .toLowerCase();
+  const opaFailMode = failModeRaw === "allow" ? "allow" : "block";
+
+  return {
+    enabled,
+    opaUrl,
+    opaDecisionPath,
+    opaTimeoutMs,
+    opaFailMode,
+  };
 }
 
 export function readCachedDecision(cache, toolName, nowMs) {
@@ -218,6 +255,95 @@ export function normalizeKnownToolArgs(event) {
   return true;
 }
 
+export function buildOpaInput(event, ctx, toolName) {
+  const params = event?.params && typeof event.params === "object" ? event.params : {};
+  const toolCallId = String(event?.toolCallId || event?.tool_call_id || "").trim();
+  const sessionKey = String(ctx?.sessionKey || "global");
+  return {
+    actor: {
+      type: "agent",
+      id: String(ctx?.agentId || "openclaw-agent"),
+      session: sessionKey,
+    },
+    runtime: {
+      source: "openclaw-preexec",
+      environment: String(process.env.SENTINEL_ENVIRONMENT || "development"),
+      production_mode: String(process.env.SENTINEL_PRODUCTION || "").trim().toLowerCase() === "true",
+    },
+    action: {
+      type: "tool_call",
+      operation: "before_tool_call",
+      target: toolName,
+      tool: toolName,
+      args: [],
+      metadata: {
+        toolCallId,
+        params,
+      },
+    },
+    context: {
+      workspace_root: String(ctx?.workspaceRoot || process.cwd()),
+      cwd: process.cwd(),
+      network: {},
+      request_id: toolCallId || `${Date.now()}`,
+      timestamp: new Date().toISOString(),
+    },
+  };
+}
+
+export async function queryOpaDecision(opaConfig, inputPayload, fetchImpl = globalThis.fetch) {
+  if (!opaConfig?.enabled) {
+    return { status: "disabled" };
+  }
+  if (typeof fetchImpl !== "function") {
+    return { status: "error", error: "fetch_unavailable" };
+  }
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeout = setTimeout(() => {
+    try {
+      controller?.abort();
+    } catch {}
+  }, opaConfig.opaTimeoutMs);
+
+  try {
+    const base = String(opaConfig.opaUrl || "").replace(/\/$/, "");
+    const path = String(opaConfig.opaDecisionPath || "");
+    const endpoint = `${base}${path.startsWith("/") ? path : `/${path}`}`;
+    const response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ input: inputPayload }),
+      signal: controller?.signal,
+    });
+
+    if (!response?.ok) {
+      return { status: "error", error: `http_${response?.status || "unknown"}` };
+    }
+    const payload = await response.json();
+    const result = payload?.result;
+    if (!result || typeof result.allow !== "boolean") {
+      return { status: "error", error: "invalid_response" };
+    }
+    const tags = Array.isArray(result.tags) ? result.tags.map((v) => String(v)) : [];
+    return {
+      status: "ok",
+      allow: result.allow,
+      reason: String(result.reason || ""),
+      tags,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      error: String(error?.message || error || "opa_error"),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function runCommand(cmd, args, timeoutMs) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
@@ -366,6 +492,32 @@ export default function register(api) {
 
     const riskyTools = resolveRiskyTools(api.pluginConfig || {});
     if (!riskyTools.has(toolName)) return {};
+
+    const opaCfg = resolveOpaConfig(api.pluginConfig || {});
+    const opaInput = buildOpaInput(event, ctx, toolName);
+    const opaDecision = await queryOpaDecision(opaCfg, opaInput);
+    if (opaDecision.status === "ok") {
+      api.logger?.info?.(
+        `source=openclaw-preexec opa_decision=${opaDecision.allow ? "allow" : "deny"} tool=${toolName} reason=${(opaDecision.reason || "").slice(0, 220)}`,
+      );
+      if (!opaDecision.allow) {
+        const reason = opaDecision.reason || `OPA denied tool '${toolName}'`;
+        return {
+          block: true,
+          blockReason: reason,
+        };
+      }
+    } else if (opaDecision.status === "error") {
+      api.logger?.warn?.(
+        `source=openclaw-preexec opa_decision=error fail_mode=${opaCfg.opaFailMode} tool=${toolName} reason=${String(opaDecision.error || "").slice(0, 220)}`,
+      );
+      if (opaCfg.opaFailMode === "block") {
+        return {
+          block: true,
+          blockReason: `Sentinel blocked tool '${toolName}' (OPA unavailable and fail_mode=block)`,
+        };
+      }
+    }
 
     const sessionKey = String(ctx?.sessionKey || "global");
     if (isProcessPollInvocation(event)) {

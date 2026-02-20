@@ -25,6 +25,25 @@ x-sentinel-common: &sentinel-common
     HF_TOKEN: "${HF_TOKEN:-}"
 
 services:
+  opa:
+    image: openpolicyagent/opa:latest
+    profiles: ["proxied"]
+    command:
+      [
+        "run",
+        "--server",
+        "--addr=0.0.0.0:8181",
+        "--set=decision_logs.console=true",
+        "/policies",
+      ]
+    ports:
+      - "127.0.0.1:8181:8181"
+    volumes:
+      - ./policies/rego:/policies:ro
+    networks:
+      - sentinel-internal
+      - external-egress
+
   sentinel-standard:
     <<: *sentinel-common
     profiles: ["standard"]
@@ -52,12 +71,14 @@ services:
     profiles: ["proxied"]
     depends_on:
       - sentinel-proxy
+      - opa
     networks:
       - sentinel-internal
     environment:
       HTTP_PROXY: "http://sentinel-proxy:3128"
       HTTPS_PROXY: "http://sentinel-proxy:3128"
       NO_PROXY: "localhost,127.0.0.1,sentinel-proxy"
+      SENTINEL_OPA_URL: "http://opa:8181"
     command: ["python", "/opt/sentinel/tests/verify_fixes.py"]
 
 networks:

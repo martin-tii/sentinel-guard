@@ -3,14 +3,17 @@ import os
 import shlex
 import io
 import socket
+import uuid
 import ipaddress
 import hashlib
 import hmac
 import threading
 import time
+import datetime
 from urllib.parse import urlparse
 from pathlib import Path
 from .utils import audit
+from .opa_client import OPAClient, OPAClientError
 
 _RAW_IO_OPEN = io.open
 
@@ -47,6 +50,9 @@ class PolicyEnforcer:
 
         self._enforce_production_integrity_prerequisites()
         self.policy = self._load_policy(self.policy_path)
+        self._opa_enabled = self._resolve_opa_enabled()
+        self._opa_fail_mode = self._resolve_opa_fail_mode()
+        self._opa_client = self._build_opa_client()
 
     def _resolve_policy_path(self, path):
         candidate = Path(path)
@@ -177,10 +183,138 @@ class PolicyEnforcer:
             "immutable_policy": bool(self._immutable_policy_enabled),
             "production_mode": bool(self._production_mode),
             "signature_mode": self._signature_mode,
+            "opa_enabled": bool(self._opa_enabled),
+            "opa_fail_mode": self._opa_fail_mode,
         }
+
+    def _resolve_opa_enabled(self):
+        env_value = os.environ.get("SENTINEL_OPA_ENABLED")
+        if env_value is not None:
+            return self._truthy(env_value)
+        opa_cfg = self.policy.get("opa", {})
+        if isinstance(opa_cfg, dict):
+            return bool(opa_cfg.get("enabled", False))
+        return False
+
+    def _resolve_opa_fail_mode(self):
+        mode = str(os.environ.get("SENTINEL_OPA_FAIL_MODE", "")).strip().lower()
+        if not mode:
+            opa_cfg = self.policy.get("opa", {})
+            if isinstance(opa_cfg, dict):
+                mode = str(opa_cfg.get("fail_mode", "deny")).strip().lower()
+        if mode not in ("deny", "allow"):
+            mode = "deny"
+        if self._production_mode and mode != "deny":
+            return "deny"
+        return mode
+
+    def _build_opa_client(self):
+        if not self._opa_enabled:
+            return None
+        opa_cfg = self.policy.get("opa", {}) if isinstance(self.policy.get("opa", {}), dict) else {}
+        base_url = str(
+            os.environ.get("SENTINEL_OPA_URL")
+            or opa_cfg.get("url")
+            or "http://127.0.0.1:8181"
+        )
+        decision_path = str(
+            os.environ.get("SENTINEL_OPA_DECISION_PATH")
+            or opa_cfg.get("decision_path")
+            or "/v1/data/sentinel/authz/decision"
+        )
+        try:
+            timeout_ms = int(
+                os.environ.get("SENTINEL_OPA_TIMEOUT_MS")
+                or opa_cfg.get("timeout_ms")
+                or 1500
+            )
+        except (TypeError, ValueError):
+            timeout_ms = 1500
+        timeout_ms = max(50, timeout_ms)
+        return OPAClient(base_url=base_url, decision_path=decision_path, timeout_ms=timeout_ms, max_retries=1)
+
+    def _workspace_root(self):
+        allowed_paths = self.policy.get("allowed_paths", [])
+        if isinstance(allowed_paths, list) and allowed_paths:
+            candidate = allowed_paths[0]
+            try:
+                return str(Path(candidate).expanduser().resolve())
+            except Exception:
+                pass
+        return str((Path.cwd() / "workspace").resolve())
+
+    def _build_policy_input(self, action_type, operation, target, *, tool="", args=None, metadata=None):
+        actor_id = str(os.environ.get("SENTINEL_ACTOR_ID", "sentinel-python")).strip() or "sentinel-python"
+        actor_session = str(os.environ.get("SENTINEL_SESSION_ID", "local")).strip() or "local"
+        environment = str(os.environ.get("SENTINEL_ENVIRONMENT", "development")).strip() or "development"
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        return {
+            "actor": {
+                "type": "runtime",
+                "id": actor_id,
+                "session": actor_session,
+            },
+            "runtime": {
+                "source": "sentinel-python",
+                "environment": environment,
+                "production_mode": bool(self._production_mode),
+            },
+            "action": {
+                "type": str(action_type),
+                "operation": str(operation),
+                "target": str(target),
+                "tool": str(tool or ""),
+                "args": list(args or []),
+                "metadata": dict(metadata or {}),
+            },
+            "context": {
+                "workspace_root": self._workspace_root(),
+                "cwd": str(Path.cwd()),
+                "network": {},
+                "request_id": str(uuid.uuid4()),
+                "timestamp": now,
+            },
+        }
+
+    def _authorize_with_opa(self, audit_action, input_payload, deny_message):
+        if not self._opa_enabled or self._opa_client is None:
+            return None
+        try:
+            result = self._opa_client.decide(input_payload)
+            reason = str(result.get("reason", "")).strip()
+            tags = result.get("tags") if isinstance(result.get("tags"), list) else []
+            detail = reason or "OPA decision received"
+            if tags:
+                detail = f"{detail} | tags={','.join(str(tag) for tag in tags)}"
+            if result.get("allow") is True:
+                audit(audit_action, detail, "ALLOWED")
+                return True
+            audit(audit_action, detail, "BLOCKED")
+            raise PermissionError(reason or deny_message)
+        except OPAClientError as exc:
+            detail = f"OPA decision error ({exc.code}): {exc}"
+            if self._opa_fail_mode == "allow":
+                audit(audit_action, f"{detail} | fail-open allow", "WARNING")
+                return True
+            audit(audit_action, f"{detail} | fail-closed deny", "BLOCKED")
+            raise PermissionError(deny_message)
 
     def check_file_access(self, path):
         """The Jail: Validate file access using Path parsing (Strict)."""
+        target_path = Path(path).resolve()
+        opa_result = self._authorize_with_opa(
+            "FILE_ACCESS",
+            self._build_policy_input(
+                "file_access",
+                "check",
+                str(target_path),
+                metadata={"path": str(target_path)},
+            ),
+            f"Access to {path} is blocked by policy.",
+        )
+        if opa_result is not None:
+            return bool(opa_result)
+
         # Resolve path to absolute
         target_path = Path(path).resolve()
         
@@ -250,6 +384,27 @@ class PolicyEnforcer:
             audit("EXEC_COMMAND", "None", "BLOCKED (Malformed)")
             raise PermissionError("Command is required.")
 
+        if isinstance(command, (list, tuple)):
+            command_text = " ".join(str(part) for part in command)
+            command_args = [str(part) for part in command]
+        else:
+            command_text = str(command)
+            command_args = []
+        opa_result = self._authorize_with_opa(
+            "EXEC_COMMAND",
+            self._build_policy_input(
+                "command_exec",
+                "run",
+                command_text,
+                tool="subprocess",
+                args=command_args,
+                metadata={"shell": bool(shell)},
+            ),
+            "Command is blocked by policy.",
+        )
+        if opa_result is not None:
+            return bool(opa_result)
+
         allowed_commands = self.policy.get("allowed_commands", [])
 
         # shell=False path: prefer structured argv and avoid shell-operator checks.
@@ -316,6 +471,36 @@ class PolicyEnforcer:
 
     def check_network(self, url):
         """The Governor: Validate actual hostnames."""
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            scheme = (parsed.scheme or "").lower()
+            port = self._effective_url_port(parsed)
+        except Exception:
+            parsed = None
+            host = ""
+            scheme = ""
+            port = None
+
+        opa_result = self._authorize_with_opa(
+            "NETWORK_ACCESS",
+            self._build_policy_input(
+                "network_http",
+                "request",
+                str(url),
+                tool="http",
+                metadata={
+                    "host": host,
+                    "scheme": scheme,
+                    "port": port,
+                    "url": str(url),
+                },
+            ),
+            "Network destination is blocked by policy.",
+        )
+        if opa_result is not None:
+            return bool(opa_result)
+
         try:
             parsed = urlparse(url)
             hostname = parsed.hostname
@@ -544,6 +729,23 @@ class PolicyEnforcer:
         Used when network_failsafe.socket_connect is enabled.
         """
         host_text = str(host).strip()
+        opa_result = self._authorize_with_opa(
+            "SOCKET_CONNECT",
+            self._build_policy_input(
+                "socket_connect",
+                "connect",
+                f"{host_text}:{port}",
+                tool="socket",
+                metadata={
+                    "host": host_text,
+                    "port": port,
+                },
+            ),
+            "Socket destination is blocked by policy.",
+        )
+        if opa_result is not None:
+            return bool(opa_result)
+
         if not host_text:
             audit("SOCKET_CONNECT", f"{host}:{port}", "BLOCKED (No Host)")
             raise PermissionError("Socket connect target host is required.")

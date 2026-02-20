@@ -2,12 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildOpaInput,
   buildDecisionCacheKey,
   inferDecisionFingerprint,
   inferToolHint,
   isProcessPollInvocation,
   normalizeKnownToolArgs,
+  queryOpaDecision,
   readCachedDecision,
+  resolveOpaConfig,
   resolveFallback,
   resolveDecisionCooldownMs,
   resolveRiskyTools,
@@ -144,4 +147,47 @@ test("isProcessPollInvocation detects process poll calls", () => {
     isProcessPollInvocation({ toolName: "process", params: { action: "list" } }),
     false,
   );
+});
+
+test("resolveOpaConfig provides secure defaults", () => {
+  const cfg = resolveOpaConfig({});
+  assert.equal(cfg.enabled, true);
+  assert.equal(cfg.opaUrl, "http://127.0.0.1:8181");
+  assert.equal(cfg.opaDecisionPath, "/v1/data/sentinel/authz/decision");
+  assert.equal(cfg.opaTimeoutMs, 1500);
+  assert.equal(cfg.opaFailMode, "block");
+});
+
+test("queryOpaDecision returns allow result for valid OPA payload", async () => {
+  const cfg = resolveOpaConfig({ opaEnabled: true });
+  const fakeFetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ result: { allow: true, reason: "ok", tags: ["allow"] } }),
+  });
+  const result = await queryOpaDecision(cfg, { action: { type: "tool_call" } }, fakeFetch);
+  assert.equal(result.status, "ok");
+  assert.equal(result.allow, true);
+  assert.equal(result.reason, "ok");
+});
+
+test("queryOpaDecision handles OPA errors", async () => {
+  const cfg = resolveOpaConfig({ opaEnabled: true });
+  const fakeFetch = async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({}),
+  });
+  const result = await queryOpaDecision(cfg, { action: { type: "tool_call" } }, fakeFetch);
+  assert.equal(result.status, "error");
+});
+
+test("buildOpaInput shapes canonical tool_call payload", () => {
+  const event = { toolName: "exec", toolCallId: "abc", params: { command: "ls" } };
+  const ctx = { sessionKey: "agent:main", agentId: "main", workspaceRoot: "/tmp/work" };
+  const input = buildOpaInput(event, ctx, "exec");
+  assert.equal(input.action.type, "tool_call");
+  assert.equal(input.action.tool, "exec");
+  assert.equal(input.actor.session, "agent:main");
+  assert.equal(input.context.workspace_root, "/tmp/work");
 });
