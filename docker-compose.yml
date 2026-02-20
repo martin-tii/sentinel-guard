@@ -57,7 +57,7 @@ services:
 
   sentinel-proxy:
     image: ubuntu/squid:latest
-    profiles: ["proxied"]
+    profiles: ["proxied", "proxied-single"]
     restart: unless-stopped
     networks:
       - sentinel-internal
@@ -80,6 +80,31 @@ services:
       NO_PROXY: "localhost,127.0.0.1,sentinel-proxy"
       SENTINEL_OPA_URL: "http://opa:8181"
     command: ["python", "/opt/sentinel/tests/verify_fixes.py"]
+
+  sentinel-proxied-single:
+    <<: *sentinel-common
+    profiles: ["proxied-single"]
+    depends_on:
+      - sentinel-proxy
+    networks:
+      - sentinel-internal
+      - external-egress
+    ports:
+      - "127.0.0.1:8181:8181"
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=unconfined
+    environment:
+      HTTP_PROXY: "http://sentinel-proxy:3128"
+      HTTPS_PROXY: "http://sentinel-proxy:3128"
+      NO_PROXY: "localhost,127.0.0.1,sentinel-proxy"
+      SENTINEL_OPA_ENABLED: "true"
+      SENTINEL_OPA_URL: "http://127.0.0.1:8181"
+      SENTINEL_EMBED_OPA_ENABLED: "true"
+      SENTINEL_OPA_ADDR: "0.0.0.0:8181"
+      SENTINEL_OPA_POLICIES_DIR: "/opt/sentinel/policies/rego"
+    entrypoint: ["/opt/sentinel/scripts/entrypoint_with_opa.sh"]
+    command: ["sh", "-lc", "while true; do sleep 3600; done"]
 
 networks:
   sentinel-internal:

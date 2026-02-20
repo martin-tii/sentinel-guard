@@ -50,6 +50,12 @@ Run local OPA for policy decisions:
 docker compose --profile proxied up -d opa
 ```
 
+Run OPA inside the Sentinel container (single-container variant):
+
+```bash
+docker compose --profile proxied-single up --build --abort-on-container-exit sentinel-proxied-single
+```
+
 For a transparent OpenClaw install/onboard flow with one extra Sentinel prompt, use:
 
 ```bash

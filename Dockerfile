@@ -1,3 +1,5 @@
+FROM openpolicyagent/opa:latest AS opa-bin
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -13,6 +15,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+COPY --from=opa-bin /opa /usr/local/bin/opa
 
 RUN pip install --no-cache-dir -e ".[prompt-guard]" "torch>=2.4.0,<3.0.0"
 
