@@ -46,17 +46,40 @@ For networked workloads, proxied mode provides Gold standard (topology-enforced 
 Detailed architecture diagrams and decision flow are in [docs/README.md](docs/README.md#how-sentinel-decides-decision-flow).
 
 ```mermaid
-flowchart LR
-    User["User / Agent"] --> CLI["sentinel-isolate"]
-    CLI --> Sandbox["Hardened Container"]
-    Sandbox --> Hooks["Sentinel Hooks"]
-    Hooks --> Policy["sentinel.yaml"]
-    Hooks --> Judge["AI Judge"]
-    Hooks --> Proxy["Sidecar Proxy"]
-    Proxy --> Internet["Internet (allowlist)"]
-    Hooks --> Approval{"Human approval?"}
-    Approval -->|approve| Internet
-    Approval -->|reject| Block["Block"]
+graph TD
+    subgraph Host ["Host Machine"]
+        style Host fill:#f9f9f9,stroke:#333
+
+        User((User)) -->|Run| CLI["Sentinel CLI"]
+
+        subgraph Sandbox ["🛡️ Secure Sandbox (Docker)"]
+            style Sandbox fill:#ffffff,stroke:#333,stroke-width:2px
+
+            Agent["🤖 Agent Process"]
+            Hooks["🪝 Sentinel Hooks"]
+            Kernel["🔒 Kernel Enforcement\n(Seccomp / Read-Only / No Caps)"]
+
+            Agent <--> Hooks
+        end
+
+        subgraph Models ["Intelligence Layer"]
+            style Models fill:#e3f2fd,stroke:#2980b9
+            PG["🛡️ Prompt Guard\n(Injection Detector)"]
+            Judge["🧠 AI Judge\n(Llama Guard)"]
+        end
+
+        Proxy["🚦 Sidecar Proxy"]
+
+        %% Connections
+        Hooks -->|Text Check| PG
+        Hooks -->|Intent Check| Judge
+        Hooks -->|Traffic| Proxy
+
+        Proxy --> Internet((☁️ Internet))
+    end
+
+    %% Styling
+    linkStyle default stroke-width:2px,fill:none,stroke:#333;
 ```
 
 ## Documentation Map
