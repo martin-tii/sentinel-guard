@@ -79,7 +79,7 @@ graph TD
     end
 
     %% Styling
-    linkStyle default stroke-width:2px,fill:none,stroke:#333;
+    linkStyle default stroke-width:2px,fill:none;
 ```
 
 ## Documentation Map
