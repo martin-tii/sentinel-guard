@@ -18,7 +18,7 @@ sentinel-isolate --build-if-missing -- python your_agent.py
 ```
 
 For networked high-assurance runs, use Gold standard (topology-enforced proxy routing):
-- [Deployment: Proxied Mode](../DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation)
+- [Deployment: Proxied Mode](./DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation)
 
 For OpenClaw-specific hardening:
 - [OpenClaw Integration](./OPENCLAW_INTEGRATION.md)

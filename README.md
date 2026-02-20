@@ -103,8 +103,8 @@ graph TD
 - Usage modes: [docs/USAGE_MODES.md](docs/USAGE_MODES.md)
 - Configuration and env vars: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
 - Validation matrix: [docs/VALIDATION_MATRIX.md](docs/VALIDATION_MATRIX.md)
-- Deployment hardening: [DEPLOYMENT.md](DEPLOYMENT.md)
-- Security posture: [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md)
+- Deployment hardening: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+- Security posture: [docs/SECURITY_ASSESSMENT.md](docs/SECURITY_ASSESSMENT.md)
 - OpenClaw integration: [docs/OPENCLAW_INTEGRATION.md](docs/OPENCLAW_INTEGRATION.md)
 - Integrity/performance benchmark: [scripts/benchmark_integrity.py](scripts/benchmark_integrity.py)
 
