@@ -7,22 +7,13 @@ Authorization policy is defined in a single OPA Rego file:
 - `policies/rego/sentinel/authz.rego` (source of truth)
 
 When `opa.enabled: true`, Sentinel authorization decisions come from OPA.
-`sentinel.yaml` policy-like fields are legacy compatibility fallback only (used when OPA is disabled).
+Do not duplicate authorization rules in `sentinel.yaml`.
 
 ## Minimal Policy Example
 
 ```yaml
-allowed_paths:
-  - "./workspace"
-allowed_commands:
-  - "echo"
-  - "ls"
-host_match_mode: "exact"   # exact | subdomain
-allowed_hosts:
-  - host: "api.openai.com"
-    match: "exact"
-    schemes: ["https"]
-    ports: [443]
+# Authorization rules live in:
+# policies/rego/sentinel/authz.rego
 
 policy_integrity:
   tamper_detection: true
@@ -64,11 +55,6 @@ phishing:
   enabled: true
   blocked_tlds: [".xyz", ".top", ".zip"]
 
-blocked_command_bases:
-  - "python"
-  - "bash"
-  - "sh"
-
 network_failsafe:
   socket_connect: true
   allow_private_network: false
@@ -90,14 +76,14 @@ Use these as quick starting points, then expand with the full policy schema abov
 
 ### 1) Strict Local / No Network
 
-- `allowed_commands`: minimal set only
-- `allowed_hosts`: empty
+- Rego policy denies network destinations by default.
+- Rego policy allows only explicit command/file/network actions.
 - `network_failsafe.socket_connect: true`
 - Run with `--network none` (or strict compose profile)
 
 ### 2) Networked Proxied (Gold standard (topology-enforced proxy routing))
 
-- `allowed_hosts`: explicit allowlist only
+- Rego policy contains explicit network allowlist.
 - `network_failsafe.socket_connect: true`
 - `network_failsafe.allow_private_network: false`
 - `opa.enabled: true` with reachable `opa.url`

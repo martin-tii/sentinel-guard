@@ -119,13 +119,11 @@ def _guard_status(policy: dict) -> list[StatusItem]:
 
 
 def _workspace_status(policy: dict) -> StatusItem:
-    allowed_paths = policy.get("allowed_paths", []) if isinstance(policy, dict) else []
-    if not isinstance(allowed_paths, list) or not allowed_paths:
-        return StatusItem("Workspace path", "No allowed_paths configured", "warn")
-
-    first = Path(str(allowed_paths[0])).expanduser()
-    if not first.is_absolute():
-        first = (_repo_root() / first).resolve()
+    env_workspace = str(os.environ.get("SENTINEL_WORKSPACE_ROOT", "")).strip()
+    if env_workspace:
+        first = Path(env_workspace).expanduser()
+    else:
+        first = (_repo_root() / "workspace").resolve()
     if first.exists():
         return StatusItem("Workspace path", str(first), "ok")
     return StatusItem("Workspace path", f"Missing: {first}", "warn")

@@ -146,13 +146,13 @@ def _friendly_reason_parts(alert: SecurityAlert) -> tuple[str, str, str]:
         return (
             "Sentinel stopped a file access outside your approved workspace.",
             "This protects against reading or changing files that are not part of this task.",
-            "Use 'Allow once' only if this file is expected, or update allowed_paths in sentinel.yaml.",
+            "Use 'Allow once' only if this file is expected, or update policies/rego/sentinel/authz.rego.",
         )
     if "not allowed" in reason_lower and ("command" in reason_lower or "command_execution" in action):
         return (
             "Sentinel blocked a command that is not on your safe command list.",
             "This prevents high-risk commands from running unexpectedly.",
-            "Use 'Allow once' if you trust it now, or add the command to allowed_commands.",
+            "Use 'Allow once' if you trust it now, or update policies/rego/sentinel/authz.rego.",
         )
     if "shell chaining" in reason_lower or "injection risk" in reason_lower:
         return (
@@ -164,7 +164,7 @@ def _friendly_reason_parts(alert: SecurityAlert) -> tuple[str, str, str]:
         return (
             "Sentinel blocked a network request to a host that is not approved.",
             "This prevents data exfiltration and accidental calls to unknown services.",
-            "Use 'Allow once' only for trusted destinations, or add the host to allowed_hosts.",
+            "Use 'Allow once' only for trusted destinations, or update policies/rego/sentinel/authz.rego.",
         )
     if "phishing risk" in reason_lower:
         return (

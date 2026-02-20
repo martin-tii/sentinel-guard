@@ -81,7 +81,9 @@ injection_scan_network_cfg.setdefault("text_content_types", list(_DEFAULT_INJECT
 ai_judge = AIJudge(judge_config)
 phishing_config = policy.policy.get("phishing", {})
 network_failsafe_config = policy.policy.get("network_failsafe", {})
-socket_failsafe_enabled = bool(network_failsafe_config.get("socket_connect", False))
+socket_failsafe_enabled = bool(network_failsafe_config.get("socket_connect", False)) or bool(
+    getattr(policy, "_opa_enabled", False)
+)
 policy_integrity_config = policy.policy.get("policy_integrity", {})
 tamper_detection_enabled = bool(policy_integrity_config.get("tamper_detection", True))
 

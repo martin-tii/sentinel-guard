@@ -1,21 +1,5 @@
-allowed_paths:
-  - "./workspace"
-blocked_paths:
-  - "/etc"
-  - "~/.ssh"
-
-allowed_commands:
-  - "echo"
-  - "ls"
-  - "ps"
-
-host_match_mode: "exact"  # exact | subdomain
-allowed_hosts:
-  - host: "api.openai.com"
-    match: "exact"
-    schemes: ["https"]
-    ports: [443]
-  - "pypi.org"
+# Authorization policy source of truth:
+# policies/rego/sentinel/authz.rego
 
 blocked_keywords:
   - "ignore previous instructions"

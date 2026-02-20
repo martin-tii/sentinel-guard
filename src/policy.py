@@ -16,6 +16,14 @@ from .utils import audit
 from .opa_client import OPAClient, OPAClientError
 
 _RAW_IO_OPEN = io.open
+_LEGACY_AUTHZ_KEYS = (
+    "allowed_paths",
+    "blocked_paths",
+    "allowed_commands",
+    "blocked_command_bases",
+    "allowed_hosts",
+    "host_match_mode",
+)
 
 
 class PolicyEnforcer:
@@ -53,6 +61,8 @@ class PolicyEnforcer:
         self._opa_enabled = self._resolve_opa_enabled()
         self._opa_fail_mode = self._resolve_opa_fail_mode()
         self._opa_client = self._build_opa_client()
+        self._legacy_authz_keys = self._legacy_authz_keys_present()
+        self._audit_legacy_authz_deprecation()
 
     def _resolve_policy_path(self, path):
         candidate = Path(path)
@@ -185,7 +195,25 @@ class PolicyEnforcer:
             "signature_mode": self._signature_mode,
             "opa_enabled": bool(self._opa_enabled),
             "opa_fail_mode": self._opa_fail_mode,
+            "legacy_authz_keys_present": list(self._legacy_authz_keys),
         }
+
+    def _legacy_authz_keys_present(self):
+        if not isinstance(self.policy, dict):
+            return tuple()
+        return tuple(key for key in _LEGACY_AUTHZ_KEYS if key in self.policy)
+
+    def _audit_legacy_authz_deprecation(self):
+        if self._opa_enabled and self._legacy_authz_keys:
+            audit(
+                "LOAD_POLICY",
+                (
+                    "Legacy YAML authz keys are deprecated and ignored while OPA is enabled: "
+                    f"{', '.join(self._legacy_authz_keys)}. "
+                    "Use policies/rego/sentinel/authz.rego as source of truth."
+                ),
+                "WARNING",
+            )
 
     def _resolve_opa_enabled(self):
         env_value = os.environ.get("SENTINEL_OPA_ENABLED")
@@ -234,11 +262,10 @@ class PolicyEnforcer:
         return OPAClient(base_url=base_url, decision_path=decision_path, timeout_ms=timeout_ms, max_retries=1)
 
     def _workspace_root(self):
-        allowed_paths = self.policy.get("allowed_paths", [])
-        if isinstance(allowed_paths, list) and allowed_paths:
-            candidate = allowed_paths[0]
+        env_workspace = str(os.environ.get("SENTINEL_WORKSPACE_ROOT", "")).strip()
+        if env_workspace:
             try:
-                return str(Path(candidate).expanduser().resolve())
+                return str(Path(env_workspace).expanduser().resolve())
             except Exception:
                 pass
         return str((Path.cwd() / "workspace").resolve())

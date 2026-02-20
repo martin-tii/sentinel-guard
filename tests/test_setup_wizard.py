@@ -26,7 +26,7 @@ class SetupWizardTests(unittest.TestCase):
             status = setup_wizard._write_policy(policy, workspace, overwrite=False)
             self.assertEqual(status, "created")
             body1 = policy.read_text(encoding="utf-8")
-            self.assertIn("allowed_paths", body1)
+            self.assertIn("policies/rego/sentinel/authz.rego", body1)
 
             status = setup_wizard._write_policy(policy, workspace, overwrite=False)
             self.assertEqual(status, "kept")
