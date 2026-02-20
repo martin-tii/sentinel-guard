@@ -66,6 +66,7 @@ graph TD
             style Models fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
             PG["🛡️ Prompt Guard\n(Injection Detector)"]
             Judge["🧠 AI Judge\n(Llama Guard)"]
+            OPA["🧩 OPA Policy Engine"]
         end
 
         Proxy["🚦 Sidecar Proxy"]
@@ -74,6 +75,7 @@ graph TD
         %% Connections
         Hooks -->|Text Check| PG
         Hooks -->|Intent Check| Judge
+        Hooks -->|Policy Decision| OPA
         Hooks -->|Traffic| Proxy
         Proxy --> Internet
     end
@@ -86,6 +88,7 @@ graph TD
     style Kernel fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
     style PG fill:#0b1220,stroke:#22c55e,stroke-width:2px,color:#f8fafc
     style Judge fill:#0b1220,stroke:#38bdf8,stroke-width:2px,color:#f8fafc
+    style OPA fill:#0b1220,stroke:#f43f5e,stroke-width:2px,color:#f8fafc
     style Proxy fill:#0b1220,stroke:#f59e0b,stroke-width:2px,color:#f8fafc
     style Internet fill:#0b1220,stroke:#94a3b8,stroke-width:2px,color:#f8fafc
 
