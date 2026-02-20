@@ -8,7 +8,7 @@ Use this page as the documentation entry point.
 - Health dashboard: run `sentinel-status`.
 - Backup/restore config: run `sentinel-config backup` and `sentinel-config restore <archive> --force`.
 - Untrusted local/python agent: start with [Quickstart](./QUICKSTART.md).
-- Networked high-assurance isolation: use [Deployment Proxied Mode](./DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation).
+- Networked high-assurance isolation: use [Deployment Proxied Mode](DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation).
 - OpenClaw hardening: use [OpenClaw Quickstart](./OPENCLAW_INTEGRATION.md#quickstart-recommended).
 
 ## Start Here
@@ -19,10 +19,10 @@ Use this page as the documentation entry point.
 
 ## Security and Operations
 
-- Deployment hardening: [DEPLOYMENT.md](./DEPLOYMENT.md)
+- Deployment hardening: [Deployment Guide](DEPLOYMENT.md)
 - Architecture overview (pillars of protection): [../README.md#architecture-pillars](../README.md#architecture-pillars)
 - Validation matrix (test-to-claim map): [VALIDATION_MATRIX.md](./VALIDATION_MATRIX.md)
-- Security posture and residual risks: [SECURITY_ASSESSMENT.md](./SECURITY_ASSESSMENT.md)
+- Security posture and residual risks: [Security Assessment](SECURITY_ASSESSMENT.md)
 - OpenClaw integration: [OPENCLAW_INTEGRATION.md](./OPENCLAW_INTEGRATION.md)
   - Transparent installer step: `cd sentinel-guard && python scripts/install_openclaw_with_sentinel.py`
   - Installer resolves `HF_TOKEN` via `--hf-token`, env, repo `.env`, or secure prompt
@@ -123,7 +123,7 @@ flowchart TD
 
 - Integrity check gate: `policy_integrity.tamper_detection` (see `sentinel.yaml`)
 - Prompt-injection lane: `judge.prompt_guard.*` and `judge.injection_scan.*`
-- Network lane: `allowed_hosts` plus proxied mode in [Deployment](./DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation)
+- Network lane: `allowed_hosts` plus proxied mode in [Deployment](DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation)
 - Command lane: `allowed_commands` and `blocked_command_bases`
 - Human escalation: `SENTINEL_APPROVAL_MODE` and custom approval handlers (see [Usage Modes](./USAGE_MODES.md#approval-handlers))
 
