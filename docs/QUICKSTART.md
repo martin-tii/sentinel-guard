@@ -9,13 +9,26 @@
 ## 5-Minute Start
 
 1. Open terminal in the project root.
-2. Run:
+2. Run guided setup:
+
+```bash
+sentinel-setup
+```
+
+3. Then run:
 
 ```bash
 ./run_demo.sh
 ```
 
 This builds the image (first run), launches strict isolation (`network none`), and runs the demo workload.
+
+4. Optional (recommended): save a backup of your config and view health:
+
+```bash
+sentinel-config backup
+sentinel-status
+```
 
 ## Common Runs
 

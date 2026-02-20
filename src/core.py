@@ -3,6 +3,7 @@ import errno
 import io
 import os
 import pathlib
+import sys
 import random
 import threading
 import subprocess
@@ -17,6 +18,8 @@ from .utils import audit, is_phishing_url
 from .judge import AIJudge
 from .approval import (
     SecurityAlert,
+    explain_security_alert,
+    in_approval_prompt,
     request_user_approval,
     set_approval_handler,
     clear_approval_handler,
@@ -302,6 +305,13 @@ def scan_untrusted_text(text, source, metadata=None):
         return text
 
     result = ai_judge.check_prompt_injection(sample, source=source)
+    if not result.get("ok", True):
+        audit(
+            "PROMPT_INJECTION",
+            f"{_scan_target(source, metadata)} | detector unavailable: {result.get('reason', 'unknown')}",
+            "WARNING",
+        )
+        return text
     if result.get("safe", True):
         return text
 
@@ -349,12 +359,57 @@ def _enforce_or_escalate(action, target, reason, recommendation):
     if request_user_approval(alert):
         audit("SECURITY_OVERRIDE", f"{action} -> {target}", "APPROVED")
         return
-    raise PermissionError(str(reason))
+    raise PermissionError(explain_security_alert(alert))
 
 
-def _should_bypass_file_policy(target):
+def _is_runtime_internal_path(path_text):
+    value = str(path_text or "").strip()
+    if not value:
+        return False
+    try:
+        candidate = pathlib.Path(value).expanduser().resolve()
+    except Exception:
+        return False
+
+    roots = []
+    for raw in (
+        sys.prefix,
+        sys.base_prefix,
+        sys.exec_prefix,
+        pathlib.Path(sys.executable).resolve().parent,
+        pathlib.Path(os.__file__).resolve().parents[1] if getattr(os, "__file__", None) else None,
+    ):
+        if not raw:
+            continue
+        try:
+            root = pathlib.Path(raw).expanduser().resolve()
+            roots.append(root)
+        except Exception:
+            continue
+
+    for root in roots:
+        try:
+            candidate.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _should_bypass_file_policy(target, *, mode=None, flags=None):
     # io.open is also used by stdlib internals with raw file descriptors.
     if isinstance(target, int):
+        return True
+
+    # Avoid recursive breakage when Python loads internal runtime/stdlib files
+    # (tracebacks, codecs, zipimport, site-packages) after a blocked action.
+    is_write = False
+    if flags is not None:
+        is_write = _is_write_flags(flags)
+    elif mode is not None:
+        is_write = _is_write_mode(mode)
+
+    if not is_write and _is_runtime_internal_path(target):
         return True
 
     return False
@@ -485,12 +540,17 @@ def _wrap_text_reader_if_needed(handle, mode, path, source):
 def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
     _assert_runtime_integrity()
     # 1. Static Policy Check (The Law)
-    if not _should_bypass_file_policy(file):
+    bypass = _should_bypass_file_policy(file, mode=mode)
+    if not bypass:
         action = _file_action_from_mode(mode)
         alert_target = _normalize_alert_path(file)
         try:
             policy.check_file_access(file)
         except PermissionError as e:
+            # Safety net: if runtime internals still reached policy check for reads,
+            # allow to avoid recursive approval loops while rendering exceptions/logs.
+            if action != "file_write" and _is_runtime_internal_path(alert_target):
+                return _original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
             _enforce_or_escalate(
                 action=action,
                 target=alert_target,
@@ -504,12 +564,15 @@ def sentinel_open(file, mode='r', buffering=-1, encoding=None, errors=None, newl
 
 def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, newline=None, closefd=True, opener=None):
     _assert_runtime_integrity()
-    if not _should_bypass_file_policy(file):
+    bypass = _should_bypass_file_policy(file, mode=mode)
+    if not bypass:
         action = _file_action_from_mode(mode)
         alert_target = _normalize_alert_path(file)
         try:
             policy.check_file_access(file)
         except PermissionError as e:
+            if action != "file_write" and _is_runtime_internal_path(alert_target):
+                return _original_io_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
             _enforce_or_escalate(
                 action=action,
                 target=alert_target,
@@ -523,12 +586,15 @@ def sentinel_io_open(file, mode='r', buffering=-1, encoding=None, errors=None, n
 
 def sentinel_path_open(self, mode='r', buffering=-1, encoding=None, errors=None, newline=None):
     _assert_runtime_integrity()
-    if not _should_bypass_file_policy(self):
+    bypass = _should_bypass_file_policy(self, mode=mode)
+    if not bypass:
         action = _file_action_from_mode(mode)
         alert_target = _normalize_alert_path(self)
         try:
             policy.check_file_access(self)
         except PermissionError as e:
+            if action != "file_write" and _is_runtime_internal_path(alert_target):
+                return _original_path_open(self, mode, buffering, encoding, errors, newline)
             _enforce_or_escalate(
                 action=action,
                 target=alert_target,
@@ -560,10 +626,13 @@ def sentinel_os_open(path, flags, mode=0o777, *, dir_fd=None):
         )
 
     normalized_path = _normalize_os_open_path(path)
-    if not _should_bypass_file_policy(normalized_path):
+    bypass = _should_bypass_file_policy(normalized_path, flags=flags)
+    if not bypass:
         try:
             policy.check_file_access(normalized_path)
         except PermissionError as e:
+            if action != "file_write" and _is_runtime_internal_path(alert_target):
+                return _original_os_open(path, flags, mode)
             _enforce_or_escalate(
                 action=action,
                 target=alert_target,
@@ -576,6 +645,8 @@ def sentinel_os_open(path, flags, mode=0o777, *, dir_fd=None):
 
 def sentinel_input(prompt=""):
     _assert_runtime_integrity()
+    if in_approval_prompt():
+        return _original_input(prompt)
     value = _original_input(prompt)
     return scan_untrusted_text(value, source="user_input:builtins.input", metadata={"path": "stdin"})
 
@@ -617,6 +688,8 @@ def _normalize_command(command):
 
 def sentinel_run(*args, **kwargs):
     _assert_runtime_integrity()
+    if in_approval_prompt():
+        return _original_run(*args, **kwargs)
     command = args[0] if args else kwargs.get('args')
     shell = kwargs.get("shell", False)
     command_str = _normalize_command(command)
@@ -651,6 +724,8 @@ def sentinel_run(*args, **kwargs):
 
 def _enforce_popen_policy(command, shell, tool_name):
     _assert_runtime_integrity()
+    if in_approval_prompt():
+        return
     command_str = _normalize_command(command)
     try:
         policy.check_command(command, shell=shell)
@@ -689,6 +764,8 @@ def sentinel_popen_init(self, *args, **kwargs):
 
 def sentinel_system(command):
     _assert_runtime_integrity()
+    if in_approval_prompt():
+        return _original_os_system(command)
     normalized = _normalize_command(command)
     try:
         policy.check_command(normalized, shell=True)

@@ -11,6 +11,26 @@ It provides:
 
 ## Recommended Path
 
+First-time setup (guided):
+
+```bash
+sentinel-setup
+```
+
+This checks Docker readiness, creates a safe default `sentinel.yaml`, prepares workspace folders, and can run an isolated smoke test.
+
+Quick health dashboard:
+
+```bash
+sentinel-status
+```
+
+Backup your Sentinel configuration before edits:
+
+```bash
+sentinel-config backup
+```
+
 Use isolation mode for untrusted workloads:
 
 ```bash

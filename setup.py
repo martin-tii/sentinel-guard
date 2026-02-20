@@ -20,6 +20,9 @@ setup(
         "console_scripts": [
             "sentinel-isolate=src.isolation:main",
             "sentinel-openclaw=src.openclaw_isolation:main",
+            "sentinel-setup=src.setup_wizard:main",
+            "sentinel-status=src.status_dashboard:main",
+            "sentinel-config=src.config_manager:main",
         ],
     },
 )

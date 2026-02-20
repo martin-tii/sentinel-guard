@@ -114,10 +114,21 @@ You can also use `console_approval_handler` or a custom callback.
 
 ![Sentinel approval popup](./images/approval-popup.png)
 
+Default approval UX now shows clear choices:
+- `Allow once`
+- `Always allow this app` (saves a reusable local rule)
+- `Block`
+
+Saved approval rules are stored at `~/.sentinel-guard/approval-rules.json` by default
+(override path with `SENTINEL_APPROVAL_RULES_PATH`).
+Blocked events also include plain-English explanations: what happened, why it was blocked, and what to do next.
+
 If no handler is explicitly set, Sentinel can still prompt by default:
 
 ```bash
 export SENTINEL_APPROVAL_MODE=auto   # auto | tkinter | console | reject
+# or explicitly prefer native desktop popups:
+export SENTINEL_APPROVAL_MODE=popup  # popup | tkinter | console | reject
 ```
 
 ## Verification

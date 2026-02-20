@@ -4,6 +4,9 @@ Use this page as the documentation entry point.
 
 ## Pick Your Path in 30 Seconds
 
+- First-time install/onboarding: run `sentinel-setup`.
+- Health dashboard: run `sentinel-status`.
+- Backup/restore config: run `sentinel-config backup` and `sentinel-config restore <archive> --force`.
 - Untrusted local/python agent: start with [Quickstart](./QUICKSTART.md).
 - Networked high-assurance isolation: use [Deployment Proxied Mode](../DEPLOYMENT.md#3-proxied-mode-gold-standard-for-networked-isolation).
 - OpenClaw hardening: use [OpenClaw Quickstart](./OPENCLAW_INTEGRATION.md#quickstart-recommended).

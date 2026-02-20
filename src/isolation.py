@@ -13,6 +13,33 @@ class IsolationError(RuntimeError):
     """Raised when isolated execution cannot be prepared or started."""
 
 
+def _friendly_isolation_error(message: str) -> str:
+    text = str(message or "").strip()
+    lower = text.lower()
+    if "seccomp" in lower:
+        return (
+            "What happened: Sentinel blocked a low-level system call in strict sandbox mode. "
+            "Why: The app requested a system operation that is not allowed by the current seccomp profile. "
+            "What to do next: Retry with --seccomp-mode log to discover needed syscalls, then tighten back to enforce. "
+            f"Technical reason: {text}"
+        )
+    if "network" in lower and ("requires --proxy" in lower or "host" in lower):
+        return (
+            "What happened: Sentinel blocked network access because the destination or proxy settings are not approved. "
+            "Why: Network safety policy allows only explicit trusted routes. "
+            "What to do next: Use approved hosts/proxy settings, or run with --network none for safest mode. "
+            f"Technical reason: {text}"
+        )
+    if "docker binary not found" in lower or "docker image" in lower:
+        return (
+            "What happened: Sentinel could not start the secure container environment. "
+            "Why: Docker is missing or the required image is unavailable. "
+            "What to do next: Install/start Docker and rerun with --build-if-missing. "
+            f"Technical reason: {text}"
+        )
+    return text
+
+
 @dataclass(frozen=True)
 class IsolationConfig:
     image: str = "sentinel-guard:local"
@@ -409,8 +436,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         enforce_proxy=args.enforce_proxy,
         build_if_missing=args.build_if_missing,
     )
-    result = run_isolated(command, cfg, check=False)
-    return int(result.returncode)
+    try:
+        result = run_isolated(command, cfg, check=False)
+        return int(result.returncode)
+    except IsolationError as exc:
+        print(f"sentinel-isolate failed: {_friendly_isolation_error(str(exc))}")
+        return 2
 
 
 if __name__ == "__main__":
